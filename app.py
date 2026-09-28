@@ -188,12 +188,14 @@ def run_pipeline():
                  .addBands(proximity_stack(aoi, lulc_maps["2021"]))
                  .classify(gbt_prob).rename("urban_prob").toFloat())
 
-    suit_sample = base_suit.sample(region=aoi, scale=SCALE * 2, numPixels=8000,
-                                   seed=1, dropNulls=True, tileScale=4)
-    suit_vals = sorted(
-        f["properties"]["urban_prob"]
-        for f in suit_sample.getInfo()["features"]
-        if f["properties"].get("urban_prob") is not None)
+    # One server-side reduction yields the whole percentile table, avoiding the
+    # 5000-element cap on pulling a sampled FeatureCollection client-side.
+    suit_pctiles = base_suit.reduceRegion(
+        ee.Reducer.percentile(list(range(0, 100))), aoi, SCALE * 2,
+        maxPixels=1e9, tileScale=4, bestEffort=True).getInfo() or {}
+    if not any(k.endswith("_p50") for k in suit_pctiles):
+        raise RuntimeError(
+            f"Unexpected percentile keys from Earth Engine: {sorted(suit_pctiles)[:8]}")
 
     def class_areas(img):
         hist = img.rename("lulc").reduceRegion(
@@ -207,11 +209,11 @@ def run_pipeline():
         nu = sum(ca[c] * tm[c][0] for c in range(1, 4))
         nt = sum(ca[c] for c in range(1, 4))
         frac = nu / nt if nt > 0 else 0
-        pctl = max(0.0, min(99.0, (1 - frac) * 100))
-        if not suit_vals:
+        pctl = max(0, min(99, int(round((1 - frac) * 100))))
+        thr = next((v for k, v in suit_pctiles.items()
+                    if k.endswith(f"_p{pctl}") and v is not None), None)
+        if thr is None:
             return cur
-        idx = min(len(suit_vals) - 1, int(pctl / 100 * len(suit_vals)))
-        thr = suit_vals[idx]
         return cur.where(cur.neq(0).And(cur.neq(2)).And(base_suit.gt(thr).unmask(0)), 0)
 
     predicted = {}
