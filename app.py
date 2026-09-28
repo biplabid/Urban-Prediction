@@ -181,31 +181,43 @@ def run_pipeline():
         s1.merge(s2), "became_urban", FEAT_BANDS)
     gbt_prob = gbt.setOutputMode("PROBABILITY")
 
-    def forecast_step(cur, comp, tm):
-        prox = proximity_stack(aoi, cur)
-        feat = comp.select(["NDVI", "NDBI", "NDWI"]).addBands(prox)
-        suit = feat.classify(gbt_prob).rename("urban_prob").updateMask(cur.neq(0))
-        pa = ee.Image.pixelArea()
-        ca = {c: ee.Number(cur.eq(c).multiply(pa)
-              .reduceRegion(ee.Reducer.sum(), aoi, SCALE, maxPixels=1e9).get("lulc")).getInfo()
-              for c in range(4)}
+    # Suitability is a static surface derived from the 2021 baseline. Computing
+    # it once keeps each forecast step a cheap threshold on a fixed image rather
+    # than nesting the previous step's whole computation graph.
+    base_suit = (composites["2021"].select(["NDVI", "NDBI", "NDWI"])
+                 .addBands(proximity_stack(aoi, lulc_maps["2021"]))
+                 .classify(gbt_prob).rename("urban_prob").toFloat())
+
+    suit_sample = base_suit.sample(region=aoi, scale=SCALE * 2, numPixels=8000,
+                                   seed=1, dropNulls=True, tileScale=4)
+    suit_vals = sorted(
+        f["properties"]["urban_prob"]
+        for f in suit_sample.getInfo()["features"]
+        if f["properties"].get("urban_prob") is not None)
+
+    def class_areas(img):
+        hist = img.rename("lulc").reduceRegion(
+            ee.Reducer.frequencyHistogram(), aoi, SCALE * 2,
+            maxPixels=1e9, tileScale=4).get("lulc").getInfo() or {}
+        px_area = (SCALE * 2) ** 2
+        return {c: hist.get(str(c), 0) * px_area for c in range(4)}
+
+    def forecast_step(cur, tm):
+        ca = class_areas(cur)
         nu = sum(ca[c] * tm[c][0] for c in range(1, 4))
         nt = sum(ca[c] for c in range(1, 4))
         frac = nu / nt if nt > 0 else 0
-        pctl = max(0, min(99, (1 - frac) * 100))
-        p = int(round(pctl))
-        sampled = suit.sample(region=aoi, scale=SCALE * 2, numPixels=8000,
-                              seed=1, dropNulls=True, tileScale=4)
-        thr = sampled.reduceColumns(
-            ee.Reducer.percentile([p]), ["urban_prob"]).get(f"p{p}").getInfo()
-        if thr is None:
+        pctl = max(0.0, min(99.0, (1 - frac) * 100))
+        if not suit_vals:
             return cur
-        return cur.where(cur.neq(0).And(suit.gt(thr).unmask(0).And(cur.neq(2))), 0)
+        idx = min(len(suit_vals) - 1, int(pctl / 100 * len(suit_vals)))
+        thr = suit_vals[idx]
+        return cur.where(cur.neq(0).And(cur.neq(2)).And(base_suit.gt(thr).unmask(0)), 0)
 
     predicted = {}
     cur = lulc_maps["2021"]
     for yr in ["2026", "2031", "2036"]:
-        cur = forecast_step(cur, composites["2021"], avg_tm)
+        cur = forecast_step(cur, avg_tm)
         predicted[yr] = cur
 
     all_lulc = {**lulc_maps, **predicted}
@@ -246,11 +258,8 @@ def run_pipeline():
             "label": f"Night Lights {y}", "opacity": 0.7
         }
 
-    suitability = (composites["2021"].select(["NDVI", "NDBI", "NDWI"])
-                   .addBands(proximity_stack(aoi, lulc_maps["2021"]))
-                   .classify(gbt_prob).rename("urban_prob").toFloat())
     tile_layers["suitability_2021"] = {
-        "url": suitability.getMapId({"min": 0, "max": 1, "palette": ["1a9850", "91cf60", "d9ef8b", "fee08b", "fc8d59", "d73027"]})["tile_fetcher"].url_format,
+        "url": base_suit.getMapId({"min": 0, "max": 1, "palette": ["1a9850", "91cf60", "d9ef8b", "fee08b", "fc8d59", "d73027"]})["tile_fetcher"].url_format,
         "type": "raster", "group": "analysis", "label": "Urban Growth Suitability", "opacity": 0.7
     }
     tile_layers["ndvi_2021"] = {
