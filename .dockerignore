@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+.git
+.github
+notebooks/
+docs/
+data/
+*.pdf
+*.ipynb_checkpoints
+.env
+service-account-key.json
