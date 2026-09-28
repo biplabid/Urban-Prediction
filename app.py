@@ -15,8 +15,8 @@ app = Flask(__name__, static_folder="public", static_url_path="")
 BBOX = {"west": 91.55, "south": 26.10, "east": 91.88, "north": 26.25}
 SCALE = 30
 LULC_PALETTE = ["e41a1c", "4daf4a", "377eb8", "c2a06a"]
-CLASSIFY_BANDS = ["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7",
-                  "NDVI", "NDBI", "NDWI"]
+INDEX_BANDS = ["NDVI", "NDBI", "NDWI", "MNDWI", "UI", "BSI", "SAVI"]
+CLASSIFY_BANDS = INDEX_BANDS
 
 EPOCHS_CFG = {
     "2000": ("2000-11-01", "2001-04-30", "L5"),
@@ -47,11 +47,26 @@ def cloud_mask_landsat(image):
     return image.updateMask(qa.bitwiseAnd(1 << 3).eq(0).And(qa.bitwiseAnd(1 << 4).eq(0)))
 
 
-def add_indices(image, nir, red, swir, green):
+def add_indices(image, nir, red, swir, green, blue, swir2):
+    """Normalized ratios only. Raw reflectance shifts with atmosphere and
+    illumination between epochs, so a classifier trained on one year's raw
+    values does not transfer to another; ratios largely cancel that out.
+    BSI is what separates bare soil from built-up, which NDBI alone cannot."""
+    b = {"nir": image.select(nir), "red": image.select(red),
+         "swir": image.select(swir), "green": image.select(green),
+         "blue": image.select(blue), "swir2": image.select(swir2)}
+    bsi = (b["swir"].add(b["red"]).subtract(b["nir"].add(b["blue"]))
+           .divide(b["swir"].add(b["red"]).add(b["nir"]).add(b["blue"]))
+           .rename("BSI"))
+    savi = (b["nir"].subtract(b["red"]).multiply(1.5)
+            .divide(b["nir"].add(b["red"]).add(0.5)).rename("SAVI"))
     return image.addBands([
         image.normalizedDifference([nir, red]).rename("NDVI"),
         image.normalizedDifference([swir, nir]).rename("NDBI"),
         image.normalizedDifference([green, nir]).rename("NDWI"),
+        image.normalizedDifference([green, swir]).rename("MNDWI"),
+        image.normalizedDifference([swir2, nir]).rename("UI"),
+        bsi, savi,
     ])
 
 
@@ -83,16 +98,14 @@ def build_composite(aoi, start, end, sensor):
         col_id = "LANDSAT/LT05/C02/T1_L2"
         sfn = scale_and_harmonize_l5
 
-    nir, red, swir, green = "SR_B5", "SR_B4", "SR_B6", "SR_B3"
-
     def _add(img):
-        return add_indices(img, nir, red, swir, green)
+        return add_indices(img, "SR_B5", "SR_B4", "SR_B6", "SR_B3", "SR_B2", "SR_B7")
 
     col = (ee.ImageCollection(col_id)
            .filterBounds(aoi).filterDate(start, end)
            .filter(ee.Filter.lt("CLOUD_COVER", 30))
            .map(cloud_mask_landsat).map(sfn).map(_add))
-    return col.select(L8_BANDS + ["NDVI", "NDBI", "NDWI"]).median().clip(aoi).toFloat()
+    return col.select(INDEX_BANDS).median().clip(aoi).toFloat()
 
 
 DT_NEIGHBORHOOD = 128
