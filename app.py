@@ -137,9 +137,9 @@ def run_pipeline():
                .Or(wc.eq(40)).Or(wc.eq(95)).Or(wc.eq(80)).Or(wc.eq(90)).Or(wc.eq(60)))
 
     train_samples = (composites["2021"].addBands(wc_label.updateMask(wc_mask))
-                     .stratifiedSample(1000, "label", aoi, SCALE, seed=42,
+                     .stratifiedSample(600, "label", aoi, SCALE, seed=42,
                                        geometries=True, tileScale=4))
-    cart = ee.Classifier.smileRandomForest(60).train(
+    cart = ee.Classifier.smileRandomForest(30, seed=42).train(
         train_samples, "label", CLASSIFY_BANDS)
 
     lulc_maps = {
@@ -147,17 +147,19 @@ def run_pipeline():
         for lbl, comp in composites.items()
     }
 
-    # Markov + GBT forecasting
+    # Markov + GBT forecasting. One frequencyHistogram per transition rather
+    # than a reduceRegion per matrix cell: 16 round trips collapse to 1.
     def compute_tm(lf, lt):
         tr = lf.multiply(10).add(lt).rename("t")
-        pa = ee.Image.pixelArea()
+        hist = tr.reduceRegion(
+            ee.Reducer.frequencyHistogram(), aoi, SCALE * 2,
+            maxPixels=1e9, tileScale=4).get("t").getInfo() or {}
         m = np.zeros((4, 4))
-        for i in range(4):
-            for j in range(4):
-                m[i][j] = ee.Number(
-                    tr.eq(i * 10 + j).multiply(pa)
-                    .reduceRegion(ee.Reducer.sum(), aoi, SCALE, maxPixels=1e9).get("t")
-                ).getInfo()
+        for k, v in hist.items():
+            code = int(float(k))
+            i, j = divmod(code, 10)
+            if 0 <= i < 4 and 0 <= j < 4:
+                m[i][j] = float(v)
         rs = m.sum(axis=1, keepdims=True)
         rs[rs == 0] = 1
         return m / rs
@@ -289,13 +291,14 @@ def run_pipeline():
         "type": "raster", "group": "terrain", "label": "Slope", "opacity": 0.6
     }
 
-    urban_stats = {}
-    for year in sorted(all_lulc.keys(), key=int):
-        a = ee.Number(
-            all_lulc[year].eq(0).multiply(ee.Image.pixelArea())
-            .reduceRegion(ee.Reducer.sum(), aoi, SCALE, maxPixels=1e9).get("lulc")
-        ).divide(1e6).getInfo()
-        urban_stats[year] = round(a, 2)
+    # All eight epochs in one reduction rather than one round trip each.
+    years_sorted = sorted(all_lulc.keys(), key=int)
+    urban_stack = ee.Image.cat([
+        all_lulc[y].eq(0).multiply(ee.Image.pixelArea()).rename(f"u{y}")
+        for y in years_sorted])
+    areas = urban_stack.reduceRegion(
+        ee.Reducer.sum(), aoi, SCALE, maxPixels=1e9, tileScale=4).getInfo() or {}
+    urban_stats = {y: round((areas.get(f"u{y}") or 0) / 1e6, 2) for y in years_sorted}
 
     return {
         "project": "Guwahati Urban Development Prediction Platform",
