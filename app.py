@@ -112,26 +112,36 @@ def run_pipeline():
     for lbl, (s, e, sen) in EPOCHS_CFG.items():
         composites[lbl] = build_composite(aoi, s, e, sen)
 
-    ref = composites["2021"]
-    ndvi, ndbi, ndwi = ref.select("NDVI"), ref.select("NDBI"), ref.select("NDWI")
-    labels = (ee.Image(0)
-              .where(ndbi.gt(0).And(ndvi.lt(0.25)), 0)
-              .where(ndvi.gt(0.35).And(ndbi.lt(0)), 1)
-              .where(ndwi.gt(0.1).And(ndvi.lt(0.15)), 2)
-              .where(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0)), 3)
-              .rename("label").toUint8())
-    mask = (ndbi.gt(0).And(ndvi.lt(0.25))
-            .Or(ndvi.gt(0.35).And(ndbi.lt(0)))
-            .Or(ndwi.gt(0.1).And(ndvi.lt(0.15)))
-            .Or(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0))))
-    samples = (ref.addBands(labels.updateMask(mask))
-               .stratifiedSample(500, "label", aoi, SCALE, seed=42, geometries=True))
-    cart = ee.Classifier.smileCart(maxNodes=50).train(samples, "label", CLASSIFY_BANDS)
+    def make_labels(comp):
+        ndvi = comp.select("NDVI")
+        ndbi = comp.select("NDBI")
+        ndwi = comp.select("NDWI")
+        labels = (ee.Image(0)
+                  .where(ndbi.gt(0).And(ndvi.lt(0.25)), 0)
+                  .where(ndvi.gt(0.35).And(ndbi.lt(0)), 1)
+                  .where(ndwi.gt(0.1).And(ndvi.lt(0.15)), 2)
+                  .where(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0)), 3)
+                  .rename("label").toUint8())
+        mask = (ndbi.gt(0).And(ndvi.lt(0.25))
+                .Or(ndvi.gt(0.35).And(ndbi.lt(0)))
+                .Or(ndwi.gt(0.1).And(ndvi.lt(0.15)))
+                .Or(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0))))
+        return labels, mask
 
-    lulc_maps = {
-        lbl: comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
-        for lbl, comp in composites.items()
-    }
+    def train_cart(comp):
+        labels, mask = make_labels(comp)
+        samples = (comp.addBands(labels.updateMask(mask))
+                   .stratifiedSample(500, "label", aoi, SCALE, seed=42, geometries=True))
+        return ee.Classifier.smileCart(maxNodes=50).train(samples, "label", CLASSIFY_BANDS)
+
+    cart_l8 = train_cart(composites["2021"])
+    cart_l5 = train_cart(composites["2010"])
+
+    lulc_maps = {}
+    for lbl, comp in composites.items():
+        sensor = EPOCHS_CFG[lbl][2]
+        cart = cart_l8 if sensor == "L8" else cart_l5
+        lulc_maps[lbl] = comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
 
     # Markov + GBT forecasting
     def compute_tm(lf, lt):
