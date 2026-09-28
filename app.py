@@ -54,38 +54,44 @@ def add_indices(image, nir, red, swir, green):
     ])
 
 
+L8_BANDS = ["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]
+L5_BANDS = ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"]
+HARMONIZE_SLOPES  = [0.9785, 0.9542, 0.9825, 1.0073, 1.0171, 0.9949]
+HARMONIZE_OFFSETS = [0.0095, 0.0064, 0.0044, -0.0119, -0.0026, -0.0015]
+
+
 def scale_l8(image):
     return image.addBands(
-        image.select(["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"])
-        .multiply(0.0000275).add(-0.2), overwrite=True)
+        image.select(L8_BANDS).multiply(0.0000275).add(-0.2), overwrite=True)
 
 
-def scale_l5(image):
-    return image.addBands(
-        image.select(["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"])
-        .multiply(0.0000275).add(-0.2), overwrite=True)
+def scale_and_harmonize_l5(image):
+    scaled = image.select(L5_BANDS).multiply(0.0000275).add(-0.2)
+    harmonized = (scaled
+                  .multiply(HARMONIZE_SLOPES)
+                  .add(HARMONIZE_OFFSETS)
+                  .rename(L8_BANDS))
+    return image.addBands(harmonized, overwrite=True)
 
 
 def build_composite(aoi, start, end, sensor):
     if sensor == "L8":
         col_id = "LANDSAT/LC08/C02/T1_L2"
-        sfn, bands = scale_l8, ["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]
-        nir, red, swir, green = "SR_B5", "SR_B4", "SR_B6", "SR_B3"
+        sfn = scale_l8
     else:
         col_id = "LANDSAT/LT05/C02/T1_L2"
-        sfn, bands = scale_l5, ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"]
-        nir, red, swir, green = "SR_B4", "SR_B3", "SR_B5", "SR_B2"
+        sfn = scale_and_harmonize_l5
 
-    _n, _r, _s, _g = nir, red, swir, green
+    nir, red, swir, green = "SR_B5", "SR_B4", "SR_B6", "SR_B3"
 
-    def _add(img, _n=_n, _r=_r, _s=_s, _g=_g):
-        return add_indices(img, _n, _r, _s, _g)
+    def _add(img):
+        return add_indices(img, nir, red, swir, green)
 
     col = (ee.ImageCollection(col_id)
            .filterBounds(aoi).filterDate(start, end)
            .filter(ee.Filter.lt("CLOUD_COVER", 30))
            .map(cloud_mask_landsat).map(sfn).map(_add))
-    return col.select(bands + ["NDVI", "NDBI", "NDWI"]).median().clip(aoi).toFloat()
+    return col.select(L8_BANDS + ["NDVI", "NDBI", "NDWI"]).median().clip(aoi).toFloat()
 
 
 def proximity_stack(aoi, lulc_img):
@@ -112,36 +118,26 @@ def run_pipeline():
     for lbl, (s, e, sen) in EPOCHS_CFG.items():
         composites[lbl] = build_composite(aoi, s, e, sen)
 
-    def make_labels(comp):
-        ndvi = comp.select("NDVI")
-        ndbi = comp.select("NDBI")
-        ndwi = comp.select("NDWI")
-        labels = (ee.Image(0)
-                  .where(ndbi.gt(0).And(ndvi.lt(0.25)), 0)
-                  .where(ndvi.gt(0.35).And(ndbi.lt(0)), 1)
-                  .where(ndwi.gt(0.1).And(ndvi.lt(0.15)), 2)
-                  .where(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0)), 3)
-                  .rename("label").toUint8())
-        mask = (ndbi.gt(0).And(ndvi.lt(0.25))
-                .Or(ndvi.gt(0.35).And(ndbi.lt(0)))
-                .Or(ndwi.gt(0.1).And(ndvi.lt(0.15)))
-                .Or(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0))))
-        return labels, mask
+    ref = composites["2021"]
+    ndvi, ndbi, ndwi = ref.select("NDVI"), ref.select("NDBI"), ref.select("NDWI")
+    labels = (ee.Image(0)
+              .where(ndbi.gt(0).And(ndvi.lt(0.25)), 0)
+              .where(ndvi.gt(0.35).And(ndbi.lt(0)), 1)
+              .where(ndwi.gt(0.1).And(ndvi.lt(0.15)), 2)
+              .where(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0)), 3)
+              .rename("label").toUint8())
+    mask = (ndbi.gt(0).And(ndvi.lt(0.25))
+            .Or(ndvi.gt(0.35).And(ndbi.lt(0)))
+            .Or(ndwi.gt(0.1).And(ndvi.lt(0.15)))
+            .Or(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0))))
+    samples = (ref.addBands(labels.updateMask(mask))
+               .stratifiedSample(500, "label", aoi, SCALE, seed=42, geometries=True))
+    cart = ee.Classifier.smileCart(maxNodes=50).train(samples, "label", CLASSIFY_BANDS)
 
-    def train_cart(comp):
-        labels, mask = make_labels(comp)
-        samples = (comp.addBands(labels.updateMask(mask))
-                   .stratifiedSample(500, "label", aoi, SCALE, seed=42, geometries=True))
-        return ee.Classifier.smileCart(maxNodes=50).train(samples, "label", CLASSIFY_BANDS)
-
-    cart_l8 = train_cart(composites["2021"])
-    cart_l5 = train_cart(composites["2010"])
-
-    lulc_maps = {}
-    for lbl, comp in composites.items():
-        sensor = EPOCHS_CFG[lbl][2]
-        cart = cart_l8 if sensor == "L8" else cart_l5
-        lulc_maps[lbl] = comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
+    lulc_maps = {
+        lbl: comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
+        for lbl, comp in composites.items()
+    }
 
     # Markov + GBT forecasting
     def compute_tm(lf, lt):
