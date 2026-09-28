@@ -1,0 +1,20 @@
+# Layer 1 — Data Ingestion
+earthengine-api>=1.4.0
+google-auth>=2.0
+requests>=2.31
+
+# Layer 2 — Feature Engineering (upcoming)
+rasterio>=1.3
+numpy>=1.24
+scipy>=1.11
+
+# Layer 3 — Forecasting (upcoming)
+scikit-learn>=1.3
+xgboost>=2.0
+
+# Layer 4 — Serving (upcoming)
+pmtiles>=3.2
+
+# Notebooks / development
+jupyter>=1.0
+matplotlib>=3.7

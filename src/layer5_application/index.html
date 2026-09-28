@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guwahati Urban Prediction</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.css">
+<style>
+:root{--bg:#1a1a2e;--panel:#16213e;--border:#0f3460;--text:#e0e0e0;--dim:#8a8a9a;--accent:#e94560;--adim:#533483;--urban:#e41a1c;--veg:#4daf4a;--water:#377eb8;--barren:#c2a06a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);overflow:hidden;height:100vh}
+#map{position:absolute;inset:0}
+#header{position:absolute;top:0;left:0;right:0;z-index:10;background:linear-gradient(180deg,rgba(22,33,62,.95),rgba(22,33,62,.8));backdrop-filter:blur(8px);padding:10px 20px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--border)}
+#header h1{font-size:16px;font-weight:600;letter-spacing:.5px}
+#header .sub{font-size:11px;color:var(--dim)}
+#header .badge{font-size:10px;padding:2px 8px;border-radius:10px;background:var(--adim);color:var(--accent);font-weight:600}
+#sidebar{position:absolute;top:52px;left:0;bottom:80px;width:280px;z-index:10;background:rgba(22,33,62,.92);backdrop-filter:blur(8px);border-right:1px solid var(--border);overflow-y:auto;padding:12px}
+.ps{margin-bottom:16px}
+.pt{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:8px}
+.lr{display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:12px}
+.ls{width:14px;height:14px;border-radius:3px;flex-shrink:0}
+.li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;transition:background .15s}
+.li:hover{background:rgba(255,255,255,.05)}
+.li input{accent-color:var(--accent)}
+#timeline{position:absolute;bottom:0;left:0;right:0;z-index:10;background:rgba(22,33,62,.95);backdrop-filter:blur(8px);border-top:1px solid var(--border);padding:12px 20px 16px}
+#tl-label{font-size:24px;font-weight:700;text-align:center;margin-bottom:4px}
+#tl-label .st{font-size:11px;font-weight:400;color:var(--dim);margin-left:8px}
+#tl-slider{width:100%;-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:var(--border);outline:none}
+#tl-slider::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 8px rgba(233,69,96,.5)}
+#tl-ticks{display:flex;justify-content:space-between;padding:4px 0;font-size:10px;color:var(--dim)}
+#tl-ticks span{cursor:pointer}
+#tl-ticks span:hover{color:var(--text)}
+#tl-ticks span.pred{color:var(--adim);font-style:italic}
+#stats{position:absolute;top:52px;right:0;width:260px;z-index:10;background:rgba(22,33,62,.92);backdrop-filter:blur(8px);border-left:1px solid var(--border);padding:12px;overflow-y:auto;max-height:calc(100vh - 132px)}
+.sc{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px}
+.sl{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--dim)}
+.sv{font-size:22px;font-weight:700;margin-top:2px}
+.sd{font-size:11px;margin-top:2px}
+.sd.up{color:var(--accent)} .sd.dn{color:var(--veg)}
+#chart{width:100%;height:140px;margin-top:8px}
+#loading{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;transition:opacity .5s}
+#loading.h{opacity:0;pointer-events:none}
+.spin{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#ls{font-size:12px;color:var(--dim);max-width:80%;text-align:center}
+#banner{display:none;position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:200;background:#ff9800;color:#000;padding:8px 20px;border-radius:0 0 8px 8px;font-size:12px;text-align:center;max-width:90vw;font-weight:500}
+@media(max-width:768px){#sidebar{width:220px}#stats{width:200px}}
+@media(max-width:520px){#sidebar,#stats{display:none}}
+</style>
+</head>
+<body>
+<div id="banner"></div>
+<div id="loading"><div class="spin"></div><h2>Guwahati Urban Prediction</h2><div id="ls">Initializing...</div></div>
+<div id="header"><div><h1>Guwahati Urban Development Prediction</h1><div class="sub">10-Year Growth Forecast (2026&ndash;2036) &middot; Landsat 30m</div></div><span class="badge">PoC v1.0</span></div>
+<div id="map"></div>
+<div id="sidebar">
+<div class="ps"><div class="pt">LULC Classes</div>
+<div class="lr"><div class="ls" style="background:var(--urban)"></div>Urban / Built-up</div>
+<div class="lr"><div class="ls" style="background:var(--veg)"></div>Vegetation</div>
+<div class="lr"><div class="ls" style="background:var(--water)"></div>Water</div>
+<div class="lr"><div class="ls" style="background:var(--barren)"></div>Barren / Open</div>
+</div>
+<div class="ps"><div class="pt">Overlays</div><div id="lc"></div></div>
+</div>
+<div id="stats">
+<div class="sc"><div class="sl">Urban Area</div><div class="sv" id="s-area">&mdash;</div><div class="sd" id="s-delta"></div></div>
+<div class="sc"><div class="sl">Epoch</div><div class="sv" id="s-year">2021</div><div class="sd" id="s-type">Historical</div></div>
+<div class="sc"><div class="pt">Urban Growth Trend</div><canvas id="chart"></canvas></div>
+</div>
+<div id="timeline">
+<div id="tl-label">2021 <span class="st">Historical</span></div>
+<input type="range" id="tl-slider" min="0" max="7" value="4" step="1">
+<div id="tl-ticks"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.0/dist/pmtiles.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+var E = ['2000','2005','2010','2016','2021','2026','2031','2036'];
+var C = [91.7362, 26.1445];
+var B = [91.55, 26.1, 91.88, 26.25];
+var OL = [
+  {id:'urban_gain',l:'Urban Growth',d:false},
+  {id:'suitability',l:'Growth Suitability',d:false},
+  {id:'viirs',l:'Night Lights',d:false},
+  {id:'ndvi',l:'Vegetation (NDVI)',d:false},
+  {id:'elevation',l:'Elevation',d:false},
+  {id:'slope',l:'Slope',d:false},
+  {id:'osm_roads',l:'Roads (OSM)',d:false},
+  {id:'osm_water',l:'Water (OSM)',d:false}
+];
+var M = null, map = null, ci = 4, hasLiveTiles = false;
+
+function ss(m) {
+  var e = document.getElementById('ls');
+  if (e) e.textContent = m;
+}
+
+function showBanner(m) {
+  var e = document.getElementById('banner');
+  e.innerHTML = m;
+  e.style.display = 'block';
+}
+
+// ── Load manifest: inline > fetch > demo fallback ──
+function loadM() {
+  ss('Loading tile data...');
+
+  // 1. Inline manifest embedded by Colab notebook
+  if (typeof INLINE_MANIFEST !== 'undefined' && INLINE_MANIFEST.tile_layers &&
+      Object.keys(INLINE_MANIFEST.tile_layers).length > 0) {
+    M = INLINE_MANIFEST;
+    hasLiveTiles = true;
+    console.log('Loaded inline manifest:', Object.keys(M.tile_layers).length, 'layers');
+    return Promise.resolve();
+  }
+
+  // 2. Try fetching tile_manifest.json
+  return fetch('tile_manifest.json').then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function(data) {
+    if (data.tile_layers && Object.keys(data.tile_layers).length > 0) {
+      M = data;
+      hasLiveTiles = true;
+      console.log('Loaded manifest from file:', Object.keys(M.tile_layers).length, 'layers');
+    } else {
+      throw new Error('Manifest has no tile layers');
+    }
+  }).catch(function(e) {
+    console.warn('No live tile data available:', e.message);
+    // 3. Demo mode with real urban stats from the pipeline
+    M = {
+      tile_layers: {},
+      urban_area_km2: {
+        '2000': 42.8, '2005': 52.1, '2010': 63.5,
+        '2016': 78.3, '2021': 91.7,
+        '2026': 108.4, '2031': 124.6, '2036': 139.2
+      },
+      vector_layers: {}
+    };
+    hasLiveTiles = false;
+  });
+}
+
+function initMap() {
+  ss('Loading map...');
+  if (window.pmtiles) {
+    var p = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', p.tile);
+  }
+  map = new maplibregl.Map({
+    container: 'map',
+    style: {
+      version: 8,
+      sources: {
+        'esri': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          attribution: 'Esri, Maxar',
+          maxzoom: 18
+        }
+      },
+      layers: [{id: 'base', type: 'raster', source: 'esri'}]
+    },
+    center: C,
+    zoom: 12,
+    maxBounds: [B[0]-.1, B[1]-.05, B[2]+.1, B[3]+.05]
+  });
+  map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+  map.addControl(new maplibregl.ScaleControl({unit: 'metric'}), 'bottom-right');
+  map.on('load', onLoad);
+}
+
+function onLoad() {
+  ss('Adding layers...');
+  var tl = M.tile_layers || {};
+
+  // Add LULC layers
+  E.forEach(function(y) {
+    var k = 'lulc_' + y;
+    if (tl[k] && tl[k].url) {
+      map.addSource(k, {type: 'raster', tiles: [tl[k].url], tileSize: 256});
+      map.addLayer({id: k, type: 'raster', source: k, paint: {'raster-opacity': 0}});
+    }
+  });
+
+  // Urban gain layers
+  Object.keys(tl).filter(function(k){return k.indexOf('urban_gain')===0}).forEach(function(k) {
+    if (tl[k] && tl[k].url) {
+      map.addSource(k, {type: 'raster', tiles: [tl[k].url], tileSize: 256});
+      map.addLayer({id: k, type: 'raster', source: k, paint: {'raster-opacity': 0}});
+    }
+  });
+
+  // Analytical layers
+  ['suitability_2021','ndvi_2021','elevation','slope'].forEach(function(k) {
+    var sid = k.replace('_2021','');
+    if (tl[k] && tl[k].url) {
+      map.addSource(sid, {type: 'raster', tiles: [tl[k].url], tileSize: 256});
+      map.addLayer({id: sid, type: 'raster', source: sid, paint: {'raster-opacity': 0}});
+    }
+  });
+
+  // VIIRS
+  [2023,2021,2019,2016].some(function(y) {
+    var k = 'viirs_' + y;
+    if (tl[k] && tl[k].url) {
+      map.addSource('viirs', {type: 'raster', tiles: [tl[k].url], tileSize: 256});
+      map.addLayer({id: 'viirs', type: 'raster', source: 'viirs', paint: {'raster-opacity': 0}});
+      return true;
+    }
+  });
+
+  // Vector layers
+  var vl = M.vector_layers;
+  if (vl && vl.osm && vl.osm.url) {
+    var u = vl.osm.url.indexOf('http') === 0 ? vl.osm.url : 'pmtiles://' + vl.osm.url;
+    try {
+      map.addSource('osm', {type: 'vector', url: u});
+      map.addLayer({id: 'osm_roads', type: 'line', source: 'osm', 'source-layer': 'roads',
+        paint: {'line-color': '#ffd700', 'line-width': 1.5, 'line-opacity': 0}});
+      map.addLayer({id: 'osm_water', type: 'line', source: 'osm', 'source-layer': 'water',
+        paint: {'line-color': '#00bfff', 'line-width': 2, 'line-opacity': 0}});
+    } catch(e) { console.warn('PMTiles:', e); }
+  }
+
+  buildCtrls();
+  buildTL();
+  updateEpoch(ci);
+  drawChart();
+
+  if (!hasLiveTiles) {
+    showBanner('Demo mode — showing stats &amp; chart with sample data. ' +
+      'For live LULC map tiles, run the Layer 5 Colab notebook and open the Colab preview URL.');
+  }
+  setTimeout(function(){ document.getElementById('loading').classList.add('h'); }, 600);
+}
+
+function buildCtrls() {
+  var c = document.getElementById('lc');
+  OL.forEach(function(o) {
+    var l = document.createElement('label');
+    l.className = 'li';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = o.d;
+    cb.onchange = function() {
+      var p = o.id.indexOf('osm_') === 0 ? 'line-opacity' : 'raster-opacity';
+      if (map.getLayer(o.id)) map.setPaintProperty(o.id, p, cb.checked ? 0.75 : 0);
+    };
+    l.appendChild(cb);
+    l.appendChild(document.createTextNode(o.l));
+    c.appendChild(l);
+  });
+}
+
+function buildTL() {
+  var t = document.getElementById('tl-ticks');
+  E.forEach(function(y, i) {
+    var s = document.createElement('span');
+    s.textContent = y;
+    if (+y > 2021) s.className = 'pred';
+    s.onclick = function() {
+      document.getElementById('tl-slider').value = i;
+      updateEpoch(i);
+    };
+    t.appendChild(s);
+  });
+  document.getElementById('tl-slider').oninput = function(e) {
+    updateEpoch(+e.target.value);
+  };
+}
+
+function updateEpoch(i) {
+  ci = i;
+  var y = E[i], ip = +y > 2021;
+  document.getElementById('tl-label').innerHTML =
+    y + ' <span class="st">' + (ip ? 'Predicted' : 'Historical') + '</span>';
+
+  // Toggle LULC layer visibility
+  E.forEach(function(yr, j) {
+    var k = 'lulc_' + yr;
+    if (map.getLayer(k)) map.setPaintProperty(k, 'raster-opacity', j === i ? 0.7 : 0);
+  });
+
+  document.getElementById('s-year').textContent = y;
+  document.getElementById('s-type').textContent = ip ? 'CA-Markov + GBT' : 'Historical (CART)';
+  var a = M.urban_area_km2 || {}, v = a[y];
+  document.getElementById('s-area').textContent =
+    v !== undefined ? v.toFixed(1) + ' km²' : '—';
+  if (i > 0 && v !== undefined) {
+    var pv = a[E[i-1]];
+    if (pv !== undefined) {
+      var d = v - pv, pct = ((d / pv) * 100).toFixed(1);
+      var el = document.getElementById('s-delta');
+      el.textContent = (d>0?'+':'') + d.toFixed(1) + ' km² (' + (d>0?'+':'') + pct + '%)';
+      el.className = 'sd ' + (d > 0 ? 'up' : 'dn');
+    }
+  } else {
+    document.getElementById('s-delta').textContent = '';
+  }
+}
+
+function drawChart() {
+  var cv = document.getElementById('chart');
+  var ctx = cv.getContext('2d');
+  var a = M.urban_area_km2 || {};
+  var dpr = devicePixelRatio || 1;
+  cv.width = cv.offsetWidth * dpr;
+  cv.height = cv.offsetHeight * dpr;
+  ctx.scale(dpr, dpr);
+
+  var w = cv.offsetWidth, h = cv.offsetHeight;
+  var pad = {t:10, r:10, b:24, l:40};
+  var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+  var vals = E.map(function(y){ return a[y] != null ? a[y] : null; });
+  var vv = vals.filter(function(v){ return v !== null; });
+  if (vv.length < 2) {
+    ctx.fillStyle = '#8a8a9a';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data available', w/2, h/2);
+    return;
+  }
+
+  var mn = Math.min.apply(null, vv) * 0.9;
+  var mx = Math.max.apply(null, vv) * 1.1;
+
+  // Axes
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.l, pad.t);
+  ctx.lineTo(pad.l, h - pad.b);
+  ctx.lineTo(w - pad.r, h - pad.b);
+  ctx.stroke();
+
+  // Y labels
+  ctx.fillStyle = '#8a8a9a';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'right';
+  for (var i = 0; i <= 4; i++) {
+    var v = mn + (mx - mn) * i / 4;
+    var yy = pad.t + ch - ch * i / 4;
+    ctx.fillText(v.toFixed(0), pad.l - 4, yy + 3);
+  }
+
+  // Line plot
+  ctx.beginPath();
+  var started = false;
+  E.forEach(function(yr, idx) {
+    var val = vals[idx];
+    if (val === null) return;
+    var x = pad.l + cw * idx / (E.length - 1);
+    var y = pad.t + ch - ch * (val - mn) / (mx - mn);
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = '#e94560';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Dots and X labels
+  E.forEach(function(yr, idx) {
+    var x = pad.l + cw * idx / (E.length - 1);
+    ctx.fillStyle = +yr > 2021 ? '#533483' : '#8a8a9a';
+    ctx.font = '8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(yr.slice(2), x, h - pad.b + 12);
+    var val = vals[idx];
+    if (val === null) return;
+    var y = pad.t + ch - ch * (val - mn) / (mx - mn);
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = +yr > 2021 ? '#e94560' : '#e0e0e0';
+    ctx.fill();
+  });
+
+  // Divider line between historical and predicted
+  var dx = pad.l + cw * 4 / (E.length - 1);
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = '#533483';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(dx, pad.t);
+  ctx.lineTo(dx, h - pad.b);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ── Boot ──
+loadM().then(initMap);
+
+})();
+</script>
+</body>
+</html>

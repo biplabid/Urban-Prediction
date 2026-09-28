@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+*.tif
+*.geojson
+data/raw/
+data/processed/
+data/tiles/
+.ipynb_checkpoints/
+node_modules/
+dist/

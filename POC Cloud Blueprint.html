@@ -1,0 +1,823 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>POC Cloud Blueprint</title>
+<meta name="description" content="Layered architecture for the Guwahati urban-change POC — reference build plus AWS and GCP mappings, sized for 10 daily users.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#f7f6f1; --surface:#ffffff; --surface-2:#efece2; --border:#dad5c7;
+  --text:#1b221d; --text-muted:#5c6259;
+  --accent:#1f6f5c; --accent-soft:#e3efe9;
+  --aws:#b5652e; --aws-soft:#f6e9dd;
+  --gcp:#2f6fb0; --gcp-soft:#e2ecf6;
+  --urban:#b5493d; --water:#3672a4; --veg:#4c8a56; --bare:#c2a06a;
+  --radius:10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0c1210; --surface:#141b17; --surface-2:#1b2420; --border:#2a352e;
+    --text:#e9ede8; --text-muted:#93a094;
+    --accent:#52d8b6; --accent-soft:#173129;
+    --aws:#e69a5c; --aws-soft:#2c2015;
+    --gcp:#79b4ec; --gcp-soft:#132436;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0c1210; --surface:#141b17; --surface-2:#1b2420; --border:#2a352e;
+  --text:#e9ede8; --text-muted:#93a094;
+  --accent:#52d8b6; --accent-soft:#173129;
+  --aws:#e69a5c; --aws-soft:#2c2015;
+  --gcp:#79b4ec; --gcp-soft:#132436;
+  color-scheme: dark;
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:"IBM Plex Sans",system-ui,sans-serif;
+  padding-inline:16px; max-width:980px; margin:0 auto;
+  line-height:1.55;
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;}
+h1,h2,h3,h4{font-family:"IBM Plex Sans",sans-serif; font-weight:600; text-wrap:balance; margin:0 0 .4em;}
+p{margin:.4em 0;}
+a{color:var(--accent);}
+img{max-width:100%;}
+
+/* ---------- hero ---------- */
+.hero{padding-block:28px 14px;}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--accent); margin-bottom:8px;
+}
+.hero h1{font-size:clamp(24px,4vw,34px);}
+.hero p.lede{color:var(--text-muted); max-width:60ch; font-size:15.5px;}
+.legend{display:flex; flex-wrap:wrap; gap:10px; margin-top:14px;}
+.swatch{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-muted);}
+.dot{width:11px; height:11px; border-radius:3px; flex:none;}
+
+.chipbar{display:flex; flex-wrap:wrap; gap:8px; margin:14px 0;}
+.chip{
+  font-family:"IBM Plex Mono",monospace; font-size:12px; padding:5px 10px;
+  border:1px solid var(--border); border-radius:999px; background:var(--surface);
+  color:var(--text-muted);
+}
+.chip b{color:var(--text); font-weight:600;}
+
+/* ---------- sizing callout ---------- */
+.callout{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px; margin:18px 0;
+}
+.callout h4{font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:8px;}
+.callout .grid{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+@media (max-width:560px){ .callout .grid{grid-template-columns:1fr;} }
+.callout .num{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:20px; color:var(--accent);}
+.callout .label{font-size:12.5px; color:var(--text-muted);}
+
+/* ---------- tabs ---------- */
+.tabbar{
+  display:flex; gap:4px; border-bottom:1px solid var(--border);
+  margin:26px 0 0; overflow-x:auto; position:sticky; top:env(safe-area-inset-top,0px);
+  background:var(--bg); z-index:5; padding-top:4px;
+}
+.tabbtn{
+  font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:14px;
+  background:none; border:none; color:var(--text-muted); padding:10px 14px;
+  cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap;
+}
+.tabbtn[aria-selected="true"]{color:var(--text); border-bottom-color:var(--accent);}
+.tabbtn:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+.tabpanel{padding-top:22px;}
+.tabpanel[hidden]{display:none;}
+
+/* ---------- overview diagram ---------- */
+.diagram-wrap{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:14px; overflow-x:auto; margin:16px 0 6px;
+}
+figure{margin:0;}
+figcaption{font-size:12.5px; color:var(--text-muted); margin-top:8px;}
+svg text{font-family:"IBM Plex Mono",monospace; fill:currentColor;}
+svg .lbl{font-family:"IBM Plex Sans",sans-serif; font-weight:600;}
+.hint{font-size:12.5px; color:var(--text-muted); margin:6px 2px 20px; display:flex; gap:6px; align-items:center;}
+.hint svg{width:14px;height:14px;flex:none;}
+
+/* ---------- plane detail (details/summary) ---------- */
+details.plane{
+  border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
+  margin:10px 0; overflow:hidden;
+}
+details.plane > summary{
+  list-style:none; cursor:pointer; display:flex; align-items:center; gap:12px;
+  padding:14px 16px; user-select:none;
+}
+details.plane > summary::-webkit-details-marker{display:none;}
+details.plane .planetag{
+  width:28px; height:28px; border-radius:8px; flex:none; display:flex; align-items:center;
+  justify-content:center; font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:12px; color:#fff;
+}
+details.plane .summary-text{flex:1 1 auto; min-width:0;}
+details.plane .summary-text .t{font-weight:600; font-size:14.5px;}
+details.plane .summary-text .s{font-size:12.5px; color:var(--text-muted);}
+details.plane .chevron{
+  flex:none; width:18px; height:18px; transition:transform .15s ease; color:var(--text-muted);
+}
+details.plane[open] .chevron{transform:rotate(90deg);}
+.plane-body{padding:4px 16px 18px;}
+.plane-body .mini-diagram{
+  background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+  padding:10px; margin:8px 0 16px; overflow-x:auto;
+}
+
+/* ---------- tables ---------- */
+.tblwrap{overflow-x:auto; margin:8px 0 4px;}
+table{border-collapse:collapse; width:100%; font-size:13px; min-width:640px;}
+th,td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top;}
+th{color:var(--text-muted); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em;}
+td.mono, th.mono{font-family:"IBM Plex Mono",monospace; font-size:12px;}
+tr:last-child td{border-bottom:none;}
+
+/* ---------- cost table ---------- */
+.costbox{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:14px 16px; margin:18px 0;
+}
+.costbox h4{font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted);}
+
+/* ---------- compare tab ---------- */
+.badge{
+  display:inline-block; font-family:"IBM Plex Mono",monospace; font-size:11px; padding:2px 7px;
+  border-radius:5px; margin-right:4px;
+}
+.badge.ref{background:var(--accent-soft); color:var(--accent);}
+.badge.aws{background:var(--aws-soft); color:var(--aws);}
+.badge.gcp{background:var(--gcp-soft); color:var(--gcp);}
+
+footer{color:var(--text-muted); font-size:12.5px; padding:30px 0 40px; border-top:1px solid var(--border); margin-top:34px;}
+</style>
+
+<div class="hero">
+  <div class="eyebrow">Urban Change Prediction · POC architecture</div>
+  <h1>From satellite pixel to browser tile, for ten users</h1>
+  <p class="lede">Three ways to build the same thing — a reference stack that costs nothing, and the AWS and GCP readings of it — decomposed down to the wire: which service, which protocol, which file format, in which direction.</p>
+  <div class="chipbar">
+    <span class="chip">Concurrency target: <b>10 DAU</b></span>
+    <span class="chip">Available pipe: <b>200 Mbps</b></span>
+    <span class="chip">Effort costed: <b>₹0 (solo build)</b></span>
+    <span class="chip">Target monthly bill: <b>$0–$5</b></span>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span class="swatch"><span class="dot" style="background:var(--urban)"></span>Urban</span>
+    <span class="swatch"><span class="dot" style="background:var(--water)"></span>Water</span>
+    <span class="swatch"><span class="dot" style="background:var(--veg)"></span>Cultivated</span>
+    <span class="swatch"><span class="dot" style="background:var(--bare)"></span>Bare soil</span>
+    <span class="swatch" style="color:var(--text-muted)">— the 4 LULC classes the POC classifies and forecasts</span>
+  </div>
+</div>
+
+<div class="callout">
+  <h4>Reading the 200&nbsp;Mbps number correctly</h4>
+  <div class="grid">
+    <div>
+      <div class="num">≈1&nbsp;GB / month</div>
+      <div class="label">Actual egress for 10 DAU: a handful of map sessions a day, mostly cached tiles. This is what the <em>serving</em> path has to carry — trivially inside every provider's free tier.</div>
+    </div>
+    <div>
+      <div class="num">200 Mbps ≈ 25 MB/s</div>
+      <div class="label">This is <em>your</em> pipe, used for the occasional bulk pull of raw imagery / classified rasters between Earth Engine, storage, and your notebook — a one-off 200&nbsp;MB export lands in under 10s. It sizes the <em>batch</em> path, not the runtime one.</div>
+    </div>
+  </div>
+</div>
+
+<div class="tabbar" role="tablist" aria-label="Architecture variant">
+  <button class="tabbtn" role="tab" id="tab-ref" aria-selected="true" aria-controls="panel-ref">Reference (free)</button>
+  <button class="tabbtn" role="tab" id="tab-aws" aria-selected="false" aria-controls="panel-aws">AWS</button>
+  <button class="tabbtn" role="tab" id="tab-gcp" aria-selected="false" aria-controls="panel-gcp">GCP</button>
+  <button class="tabbtn" role="tab" id="tab-cmp" aria-selected="false" aria-controls="panel-cmp">Compare &amp; cost</button>
+</div>
+
+<!-- ============================================================ REFERENCE ============================================================ -->
+<section class="tabpanel" id="panel-ref" role="tabpanel" aria-labelledby="tab-ref">
+  <h3>Overview — three planes, one always-on</h3>
+  <p style="color:var(--text-muted); font-size:13.5px;">Classification and simulation run in batches you trigger by hand. Only the serving plane is "live," and it's fully static — no server executes code when a browser asks for a tile.</p>
+
+  <div class="diagram-wrap">
+    <figure>
+      <svg viewBox="0 0 900 190" role="img" aria-label="Owner triggers Earth Engine classification, which exports to Colab for simulation and tiling, which publishes to Firebase Hosting and Cloud Storage, served over HTTPS to up to 10 daily browser users." style="width:100%;height:auto;">
+        <defs>
+          <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0L10,5L0,10z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-size="11">
+          <rect x="8" y="55" width="128" height="60" rx="8" fill="var(--surface-2)" stroke="currentColor"/>
+          <text x="72" y="80" text-anchor="middle" class="lbl">You</text>
+          <text x="72" y="96" text-anchor="middle" fill="var(--text-muted)">triggers batch jobs</text>
+
+          <rect x="196" y="55" width="150" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="271" y="78" text-anchor="middle" class="lbl">Classify</text>
+          <text x="271" y="94" text-anchor="middle" fill="var(--text-muted)">Earth Engine</text>
+
+          <rect x="406" y="55" width="150" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="481" y="78" text-anchor="middle" class="lbl">Simulate + tile</text>
+          <text x="481" y="94" text-anchor="middle" fill="var(--text-muted)">Colab</text>
+
+          <rect x="616" y="55" width="150" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="691" y="78" text-anchor="middle" class="lbl">Serve</text>
+          <text x="691" y="94" text-anchor="middle" fill="var(--text-muted)">Firebase + GCS</text>
+
+          <rect x="812" y="45" width="82" height="80" rx="8" fill="var(--surface-2)" stroke="currentColor"/>
+          <text x="853" y="80" text-anchor="middle" class="lbl">Browser</text>
+          <text x="853" y="95" text-anchor="middle" fill="var(--text-muted)" font-size="10">≤10 DAU</text>
+
+          <line x1="136" y1="85" x2="192" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="164" y="45" text-anchor="middle" fill="var(--text-muted)">pull imagery</text>
+
+          <line x1="346" y1="85" x2="402" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="374" y="45" text-anchor="middle" fill="var(--text-muted)">export COG</text>
+          <text x="374" y="140" text-anchor="middle" fill="var(--text-muted)" font-size="10">~100–200MB · one-off</text>
+
+          <line x1="556" y1="85" x2="612" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="584" y="45" text-anchor="middle" fill="var(--text-muted)">publish tiles</text>
+          <text x="584" y="140" text-anchor="middle" fill="var(--text-muted)" font-size="10">~50–150MB · one-off</text>
+
+          <line x1="766" y1="85" x2="808" y2="85" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrR)"/>
+          <text x="787" y="45" text-anchor="middle" fill="var(--accent)" font-size="10">HTTPS</text>
+          <text x="787" y="140" text-anchor="middle" fill="var(--accent)" font-size="10">~1–3MB/session</text>
+        </g>
+      </svg>
+      <figcaption>Dashed arrows: occasional batch transfers, sized by your 200 Mbps pipe. Solid arrow: the always-on serving path, sized by 10 DAU.</figcaption>
+    </figure>
+  </div>
+  <p class="hint"><svg viewBox="0 0 20 20"><path d="M4 4l12 6-12 6 3-6z" fill="currentColor"/></svg>Expand each plane below for its internal services, data movement, and protocols.</p>
+
+  <!-- PLANE A -->
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--accent)">A</span>
+      <span class="summary-text"><span class="t">Classify — Google Earth Engine</span><span class="s"> · turns raw satellite scenes into a 4-class LULC raster per epoch</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 640 130" role="img" aria-label="Earth Engine reads Sentinel-2 and Landsat catalogs server-side, runs a CART classifier, and exports a Cloud-Optimized GeoTIFF to Cloud Storage." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="6" y="35" width="150" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="81" y="60" text-anchor="middle" class="lbl">Public catalog</text>
+            <text x="81" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">S2_SR / LC08 L2</text>
+
+            <rect x="240" y="20" width="170" height="90" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="325" y="45" text-anchor="middle" class="lbl">EE Code Editor</text>
+            <text x="325" y="62" text-anchor="middle" fill="var(--text-muted)" font-size="10">cloud mask · NDVI/NDBI/NDWI</text>
+            <text x="325" y="78" text-anchor="middle" fill="var(--text-muted)" font-size="10">ee.Classifier.smileCart()</text>
+            <text x="325" y="94" text-anchor="middle" fill="var(--text-muted)" font-size="10">~180 labeled points</text>
+
+            <rect x="480" y="35" width="150" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+            <text x="555" y="60" text-anchor="middle" class="lbl">Cloud Storage</text>
+            <text x="555" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">raw/lulc/{year}.tif</text>
+
+            <line x1="156" y1="65" x2="236" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="196" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">server-side read</text>
+            <line x1="410" y1="65" x2="476" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="443" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">export</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / format</th><th>Auth</th></tr>
+        <tr><td>1. Read imagery</td><td>AOI polygon; &lt;5% cloud filter</td><td class="mono">EE server-side compute (no download)</td><td class="mono">ImageCollection, internal</td><td>Google OAuth2 / service-account JSON</td></tr>
+        <tr><td>2. Classify</td><td>4 classes: urban, water, cultivated, bare</td><td class="mono">ee.Classifier.smileCart()</td><td class="mono">In-memory raster</td><td>same session</td></tr>
+        <tr><td>3. Export</td><td><code class="mono">Export.image.toCloudStorage</code>, <code class="mono">cloudOptimized:true</code></td><td class="mono">EE Batch Task API over HTTPS, async, poll for completion</td><td class="mono">COG GeoTIFF, ~50–200MB</td><td>OAuth2 / SA key, scope <code class="mono">earthengine.readonly</code>+write to bucket</td></tr>
+      </table></div>
+    </div>
+  </details>
+
+  <!-- PLANE B -->
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--accent)">B</span>
+      <span class="summary-text"><span class="t">Simulate + tile — Colab</span><span class="s"> · CA-Markov forecast to 2036/2046, packaged as web tiles</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 700 130" role="img" aria-label="Colab reads classified rasters, runs a CA-Markov transition model, writes forecast rasters, tiles them into a single PMTiles archive, and uploads it back to Cloud Storage." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="4" y="35" width="130" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="69" y="60" text-anchor="middle" class="lbl">GCS: raw/</text>
+            <text x="69" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">lulc/*.tif</text>
+
+            <rect x="212" y="20" width="170" height="90" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="297" y="45" text-anchor="middle" class="lbl">Colab (free T4/CPU)</text>
+            <text x="297" y="62" text-anchor="middle" fill="var(--text-muted)" font-size="10">transition matrix</text>
+            <text x="297" y="78" text-anchor="middle" fill="var(--text-muted)" font-size="10">CA-Markov, numpy/scipy</text>
+            <text x="297" y="94" text-anchor="middle" fill="var(--text-muted)" font-size="10">gdal2tiles → PMTiles</text>
+
+            <rect x="460" y="35" width="150" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+            <text x="535" y="56" text-anchor="middle" class="lbl">GCS: tiles/</text>
+            <text x="535" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">forecast.pmtiles</text>
+            <text x="535" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="10">public-read</text>
+
+            <line x1="134" y1="65" x2="208" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="171" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">gcsfs read</text>
+            <line x1="382" y1="65" x2="456" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="419" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">gsutil / put</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / format</th><th>Auth</th></tr>
+        <tr><td>1. Load rasters</td><td>3 historical epochs (1993/2008/2024-equivalent)</td><td class="mono">google-cloud-storage / gcsfs, HTTPS</td><td class="mono">COG GeoTIFF, ~50–200MB each</td><td>Colab auto user-OAuth</td></tr>
+        <tr><td>2. Transition + CA-Markov</td><td>5×5 neighborhood filter, 2 forecast horizons</td><td class="mono">local compute, no network</td><td class="mono">numpy / scipy.ndimage</td><td>—</td></tr>
+        <tr><td>3. Rasterize forecast</td><td>years t+10, t+20</td><td class="mono">rio-cogeo</td><td class="mono">COG GeoTIFF</td><td>—</td></tr>
+        <tr><td>4. Tile</td><td>zoom 8–15, single-file archive (avoids millions of small objects)</td><td class="mono"><code>pmtiles convert</code></td><td class="mono">PMTiles, 20–150MB total</td><td>—</td></tr>
+        <tr><td>5. Publish</td><td><code class="mono">Cache-Control: public, max-age=86400</code></td><td class="mono">HTTPS PUT, JSON API</td><td class="mono">object ACL public-read</td><td>SA key (scripted) or user OAuth (manual)</td></tr>
+      </table></div>
+    </div>
+  </details>
+
+  <!-- PLANE C -->
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--accent)">C</span>
+      <span class="summary-text"><span class="t">Serve — Firebase Hosting + Cloud Storage</span><span class="s"> · the only always-on plane, 100% static</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 700 130" role="img" aria-label="A browser loads a static MapLibre app from Firebase Hosting's CDN, then makes HTTP range requests directly against the PMTiles archive in Cloud Storage." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="4" y="35" width="170" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="89" y="56" text-anchor="middle" class="lbl">Firebase Hosting</text>
+            <text x="89" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">index.html + app.js</text>
+            <text x="89" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="10">global CDN edge</text>
+
+            <rect x="255" y="35" width="150" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="330" y="60" text-anchor="middle" class="lbl">Browser</text>
+            <text x="330" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">MapLibre GL + pmtiles.js</text>
+
+            <rect x="486" y="35" width="180" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+            <text x="576" y="56" text-anchor="middle" class="lbl">GCS: tiles/*.pmtiles</text>
+            <text x="576" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">served via CDN edge</text>
+
+            <line x1="174" y1="65" x2="251" y2="65" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrR)"/>
+            <text x="212" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">GET / , HTTP/2</text>
+            <line x1="405" y1="65" x2="482" y2="65" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrR)"/>
+            <text x="443" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">Range GET</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / size</th><th>Auth</th></tr>
+        <tr><td>1. Deploy app</td><td><code class="mono">firebase deploy</code></td><td class="mono">HTTPS / gRPC (Firebase CLI)</td><td class="mono">~2–5MB bundle</td><td>Firebase project token</td></tr>
+        <tr><td>2. App shell load</td><td>immutable asset caching</td><td class="mono">HTTPS, TLS 1.3, HTTP/2, CDN edge (global POPs)</td><td class="mono">~150KB gzipped, cached after first visit</td><td>none (public)</td></tr>
+        <tr><td>3. Tile fetch</td><td>MapLibre reads PMTiles directory index once, then targeted ranges</td><td class="mono"><code>Range: bytes=X-Y</code>, HTTP/1.1 or 2, no server compute</td><td class="mono">5–30 range reads/view, few 100KB</td><td>bucket object public-read</td></tr>
+        <tr><td>4. Year slider</td><td>multi-layer PMTiles or small companion file</td><td class="mono">client-side only, no round trip</td><td class="mono">—</td><td>—</td></tr>
+      </table></div>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-top:10px;">Sizing: 10 DAU × ~5 views/day × ~1.5MB ≈ 2.3GB/month egress — inside Firebase Hosting's 10GB/month free tier and GCS's free egress allowance. No compute runs per request.</p>
+    </div>
+  </details>
+
+  <div class="costbox">
+    <h4>Reference stack — monthly cost at 10 DAU</h4>
+    <div class="tblwrap"><table>
+      <tr><th>Line item</th><th>Free allowance</th><th>Expected use</th><th>Cost</th></tr>
+      <tr><td>Earth Engine</td><td>free for research/non-commercial</td><td>a few batch exports</td><td class="mono">$0</td></tr>
+      <tr><td>Cloud Storage</td><td>5GB always-free</td><td>&lt;1GB rasters + tiles</td><td class="mono">$0</td></tr>
+      <tr><td>Colab</td><td>free T4/CPU runtime</td><td>a few sessions</td><td class="mono">$0</td></tr>
+      <tr><td>Firebase Hosting</td><td>10GB/mo transfer, 360MB/day</td><td>~2.3GB/mo</td><td class="mono">$0</td></tr>
+      <tr><td><b>Total</b></td><td></td><td></td><td class="mono"><b>$0/mo</b></td></tr>
+    </table></div>
+  </div>
+</section>
+
+<!-- ============================================================ AWS ============================================================ -->
+<section class="tabpanel" id="panel-aws" role="tabpanel" aria-labelledby="tab-aws" hidden>
+  <h3>Overview — same three planes, AWS-native</h3>
+  <p style="color:var(--text-muted); font-size:13.5px;">AWS has no Earth-Engine equivalent, so classification moves to your own compute reading public imagery from the AWS Open Data Registry. Everything downstream maps cleanly.</p>
+
+  <div class="diagram-wrap">
+    <figure>
+      <svg viewBox="0 0 900 190" role="img" aria-label="Owner triggers a SageMaker or EC2 job reading S3 Open Data imagery, which writes to your S3 bucket for simulation and tiling on the same compute, published behind CloudFront and served over HTTPS to up to 10 daily browser users." style="width:100%;height:auto;">
+          <g font-size="11">
+          <rect x="8" y="55" width="128" height="60" rx="8" fill="var(--surface-2)" stroke="currentColor"/>
+          <text x="72" y="80" text-anchor="middle" class="lbl">You</text>
+          <text x="72" y="96" text-anchor="middle" fill="var(--text-muted)">triggers batch jobs</text>
+
+          <rect x="196" y="55" width="150" height="60" rx="8" fill="var(--aws-soft)" stroke="var(--aws)"/>
+          <text x="271" y="72" text-anchor="middle" class="lbl">Classify</text>
+          <text x="271" y="88" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">SageMaker Studio Lab</text>
+          <text x="271" y="100" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">/ EC2 t4g.micro</text>
+
+          <rect x="406" y="55" width="150" height="60" rx="8" fill="var(--aws-soft)" stroke="var(--aws)"/>
+          <text x="481" y="78" text-anchor="middle" class="lbl">Simulate + tile</text>
+          <text x="481" y="94" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">same notebook/EC2</text>
+
+          <rect x="616" y="55" width="150" height="60" rx="8" fill="var(--aws-soft)" stroke="var(--aws)"/>
+          <text x="691" y="72" text-anchor="middle" class="lbl">Serve</text>
+          <text x="691" y="88" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">S3 + CloudFront</text>
+
+          <rect x="812" y="45" width="82" height="80" rx="8" fill="var(--surface-2)" stroke="currentColor"/>
+          <text x="853" y="80" text-anchor="middle" class="lbl">Browser</text>
+          <text x="853" y="95" text-anchor="middle" fill="var(--text-muted)" font-size="10">≤10 DAU</text>
+
+          <line x1="136" y1="85" x2="192" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="164" y="45" text-anchor="middle" fill="var(--text-muted)">S3 GetObject</text>
+
+          <line x1="346" y1="85" x2="402" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="374" y="45" text-anchor="middle" fill="var(--text-muted)">write COG</text>
+          <text x="374" y="140" text-anchor="middle" fill="var(--text-muted)" font-size="10">~100–200MB · one-off</text>
+
+          <line x1="556" y1="85" x2="612" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="584" y="45" text-anchor="middle" fill="var(--text-muted)">publish tiles</text>
+          <text x="584" y="140" text-anchor="middle" fill="var(--text-muted)" font-size="10">~50–150MB · one-off</text>
+
+          <line x1="766" y1="85" x2="808" y2="85" stroke="var(--aws)" stroke-width="2" marker-end="url(#arrR)"/>
+          <text x="787" y="45" text-anchor="middle" fill="var(--aws)" font-size="10">HTTPS</text>
+          <text x="787" y="140" text-anchor="middle" fill="var(--aws)" font-size="10">~1–3MB/session</text>
+        </g>
+      </svg>
+    </figure>
+    <figcaption>Same shape as the reference build; every node swaps to an AWS-managed service.</figcaption>
+  </div>
+  <p class="hint"><svg viewBox="0 0 20 20"><path d="M4 4l12 6-12 6 3-6z" fill="currentColor"/></svg>Expand each plane below for services, data movement, and protocols.</p>
+
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--aws)">A</span>
+      <span class="summary-text"><span class="t">Classify — Open Data + SageMaker/EC2</span><span class="s"> · rasterio + scikit-learn stand in for Earth Engine's CART</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 700 130" role="img" aria-label="SageMaker Studio Lab or an EC2 instance reads Sentinel-2 cloud-optimized GeoTIFFs from the AWS Open Data S3 bucket, classifies with scikit-learn, and writes a classified COG to your own S3 bucket." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="4" y="35" width="170" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="89" y="56" text-anchor="middle" class="lbl">s3://sentinel-cogs</text>
+            <text x="89" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">AWS Open Data (public)</text>
+            <text x="89" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="10">us-west-2</text>
+
+            <rect x="255" y="20" width="180" height="90" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="345" y="45" text-anchor="middle" class="lbl">Studio Lab / EC2</text>
+            <text x="345" y="62" text-anchor="middle" fill="var(--text-muted)" font-size="10">rasterio cloud mask</text>
+            <text x="345" y="78" text-anchor="middle" fill="var(--text-muted)" font-size="10">sklearn DecisionTreeClassifier</text>
+            <text x="345" y="94" text-anchor="middle" fill="var(--text-muted)" font-size="10">t4g.micro, free tier</text>
+
+            <rect x="516" y="35" width="150" height="60" rx="8" fill="var(--aws-soft)" stroke="var(--aws)"/>
+            <text x="591" y="60" text-anchor="middle" class="lbl">Your S3 bucket</text>
+            <text x="591" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">raw/lulc/{year}.tif</text>
+
+            <line x1="174" y1="65" x2="251" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="212" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">GetObject, /vsis3/</text>
+            <line x1="435" y1="65" x2="512" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="473" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">PutObject</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / format</th><th>Auth</th></tr>
+        <tr><td>1. Read imagery</td><td>same-region read = $0 egress</td><td class="mono">S3 REST API (SigV4), or GDAL <code>/vsis3/</code></td><td class="mono">Sentinel-2 L2A COG</td><td>IAM role (Studio Lab) or access key</td></tr>
+        <tr><td>2. Cloud mask + indices</td><td>NDVI/NDBI/NDWI bands</td><td class="mono">rasterio + numpy, local compute</td><td class="mono">in-memory arrays</td><td>—</td></tr>
+        <tr><td>3. Train + classify</td><td>~180 hand-labeled points, 4 classes</td><td class="mono">sklearn.tree.DecisionTreeClassifier</td><td class="mono">in-memory raster</td><td>—</td></tr>
+        <tr><td>4. Write COG</td><td>same folder layout as reference</td><td class="mono"><code>boto3.put_object</code>, HTTPS SigV4</td><td class="mono">COG GeoTIFF, ~50–200MB</td><td>IAM role, least-privilege bucket policy</td></tr>
+      </table></div>
+    </div>
+  </details>
+
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--aws)">B</span>
+      <span class="summary-text"><span class="t">Simulate + tile — same compute, boto3</span><span class="s"> · identical CA-Markov script, AWS SDK for I/O</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 700 130" role="img" aria-label="The same notebook reads classified rasters from S3, runs CA-Markov, tiles the forecast into a PMTiles archive, and uploads it back to S3 with a public-read bucket policy." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="4" y="35" width="130" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="69" y="60" text-anchor="middle" class="lbl">S3: raw/</text>
+            <text x="69" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">lulc/*.tif</text>
+
+            <rect x="212" y="20" width="170" height="90" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="297" y="45" text-anchor="middle" class="lbl">Studio Lab / EC2</text>
+            <text x="297" y="62" text-anchor="middle" fill="var(--text-muted)" font-size="10">transition matrix</text>
+            <text x="297" y="78" text-anchor="middle" fill="var(--text-muted)" font-size="10">CA-Markov, numpy/scipy</text>
+            <text x="297" y="94" text-anchor="middle" fill="var(--text-muted)" font-size="10">gdal2tiles → PMTiles</text>
+
+            <rect x="460" y="35" width="150" height="60" rx="8" fill="var(--aws-soft)" stroke="var(--aws)"/>
+            <text x="535" y="56" text-anchor="middle" class="lbl">S3: tiles/</text>
+            <text x="535" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">forecast.pmtiles</text>
+            <text x="535" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="10">bucket policy: OAC only</text>
+
+            <line x1="134" y1="65" x2="208" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="171" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">boto3 get</text>
+            <line x1="382" y1="65" x2="456" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="419" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">boto3 put</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / format</th><th>Auth</th></tr>
+        <tr><td>1–4. Simulate, forecast, tile</td><td>identical to reference plane B</td><td class="mono">local compute, no network</td><td class="mono">COG → PMTiles, 20–150MB</td><td>—</td></tr>
+        <tr><td>5. Publish</td><td>bucket kept private; read via CloudFront Origin Access Control, not public ACLs</td><td class="mono">HTTPS PUT, SigV4</td><td class="mono">PMTiles archive</td><td>IAM role</td></tr>
+      </table></div>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-top:10px;">EC2 t4g.micro (Graviton, ARM): 750 free hours/month for 12 months — plenty for occasional batch runs. SageMaker Studio Lab is free indefinitely, separate from the 12-month AWS Free Tier clock.</p>
+    </div>
+  </details>
+
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--aws)">C</span>
+      <span class="summary-text"><span class="t">Serve — S3 + CloudFront</span><span class="s"> · private bucket behind a CDN, origin never public</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 700 130" role="img" aria-label="A browser loads a static app from a CloudFront distribution in front of a private S3 bucket, then issues HTTP range requests through the same distribution to read the PMTiles archive." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="4" y="20" width="170" height="90" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="89" y="42" text-anchor="middle" class="lbl">CloudFront</text>
+            <text x="89" y="58" text-anchor="middle" fill="var(--text-muted)" font-size="10">TLS via ACM</text>
+            <text x="89" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">HTTP/2 + HTTP/3</text>
+            <text x="89" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="10">OAC → private S3</text>
+            <text x="89" y="100" text-anchor="middle" fill="var(--text-muted)" font-size="10">origin</text>
+
+            <rect x="255" y="35" width="150" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="330" y="60" text-anchor="middle" class="lbl">Browser</text>
+            <text x="330" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">MapLibre GL + pmtiles.js</text>
+
+            <rect x="486" y="35" width="180" height="60" rx="8" fill="var(--aws-soft)" stroke="var(--aws)"/>
+            <text x="576" y="56" text-anchor="middle" class="lbl">S3 (private)</text>
+            <text x="576" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">app/ + tiles/*.pmtiles</text>
+
+            <line x1="174" y1="65" x2="251" y2="65" stroke="var(--aws)" stroke-width="2" marker-end="url(#arrR)"/>
+            <text x="212" y="120" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">GET /</text>
+            <line x1="405" y1="65" x2="482" y2="65" stroke="currentColor" stroke-dasharray="4,3" marker-end="url(#arrR)"/>
+            <text x="443" y="120" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">on cache miss</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / size</th><th>Auth</th></tr>
+        <tr><td>1. Deploy app</td><td>invalidate on redeploy</td><td class="mono"><code>aws s3 sync</code>, HTTPS SigV4</td><td class="mono">~2–5MB bundle</td><td>IAM user/role</td></tr>
+        <tr><td>2. CDN edge</td><td>S3 bucket has no public access; CloudFront OAC signs the origin request</td><td class="mono">HTTPS, TLS 1.2+, HTTP/2 &amp; 3</td><td class="mono">~150KB app shell, cached</td><td>public viewer, signed origin fetch</td></tr>
+        <tr><td>3. Tile fetch</td><td>CloudFront passes Range headers straight through to S3</td><td class="mono"><code>Range: bytes=X-Y</code></td><td class="mono">5–30 reads/view</td><td>public viewer</td></tr>
+      </table></div>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-top:10px;">First 12 months: 1TB/month CloudFront egress free. After that: ≈$0.085/GB — at ~2–3GB/month that's under 30¢.</p>
+    </div>
+  </details>
+
+  <div class="costbox">
+    <h4>AWS stack — monthly cost at 10 DAU</h4>
+    <div class="tblwrap"><table>
+      <tr><th>Line item</th><th>Free allowance</th><th>Expected use</th><th>Cost</th></tr>
+      <tr><td>SageMaker Studio Lab</td><td>free indefinitely (12h CPU / 4h GPU sessions)</td><td>a few batch sessions</td><td class="mono">$0</td></tr>
+      <tr><td>EC2 t4g.micro (alt.)</td><td>750 hrs/mo, first 12 months</td><td>only if not using Studio Lab</td><td class="mono">$0</td></tr>
+      <tr><td>S3</td><td>5GB, first 12 months</td><td>&lt;1GB</td><td class="mono">$0</td></tr>
+      <tr><td>CloudFront</td><td>1TB egress, first 12 months</td><td>~2–3GB/mo</td><td class="mono">$0 → ~$0.25 after year 1</td></tr>
+      <tr><td><b>Total</b></td><td></td><td></td><td class="mono"><b>$0/mo (year 1), &lt;$1/mo after</b></td></tr>
+    </table></div>
+  </div>
+</section>
+
+<!-- ============================================================ GCP ============================================================ -->
+<section class="tabpanel" id="panel-gcp" role="tabpanel" aria-labelledby="tab-gcp" hidden>
+  <h3>Overview — the reference stack, wearing proper IAM</h3>
+  <p style="color:var(--text-muted); font-size:13.5px;">Since Earth Engine already lives on Google Cloud, this variant keeps it but swaps the free-tier shortcuts (manual Colab runs, public-read objects) for the services a reviewer would expect in a GCP solution architecture: scheduled triggers, a managed notebook, Secret Manager, and an explicit CDN + load balancer.</p>
+
+  <div class="diagram-wrap">
+    <figure>
+      <svg viewBox="0 0 900 190" role="img" aria-label="Cloud Scheduler triggers a Cloud Function that runs Earth Engine classification, exporting to Cloud Storage; Vertex AI Workbench runs CA-Markov and Cloud Build packages tiles; Cloud CDN with an external load balancer serves the app and tiles over HTTPS to up to 10 daily browser users." style="width:100%;height:auto;">
+        <g font-size="11">
+          <rect x="8" y="55" width="128" height="60" rx="8" fill="var(--surface-2)" stroke="currentColor"/>
+          <text x="72" y="74" text-anchor="middle" class="lbl">Cloud Scheduler</text>
+          <text x="72" y="90" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">or manual trigger</text>
+
+          <rect x="196" y="55" width="150" height="60" rx="8" fill="var(--gcp-soft)" stroke="var(--gcp)"/>
+          <text x="271" y="72" text-anchor="middle" class="lbl">Classify</text>
+          <text x="271" y="88" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">Cloud Function</text>
+          <text x="271" y="100" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">+ Earth Engine</text>
+
+          <rect x="406" y="55" width="150" height="60" rx="8" fill="var(--gcp-soft)" stroke="var(--gcp)"/>
+          <text x="481" y="72" text-anchor="middle" class="lbl">Simulate + tile</text>
+          <text x="481" y="88" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">Vertex AI Workbench</text>
+          <text x="481" y="100" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">+ Cloud Build</text>
+
+          <rect x="616" y="55" width="150" height="60" rx="8" fill="var(--gcp-soft)" stroke="var(--gcp)"/>
+          <text x="691" y="72" text-anchor="middle" class="lbl">Serve</text>
+          <text x="691" y="88" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">Cloud CDN + LB</text>
+          <text x="691" y="100" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">+ Cloud Storage</text>
+
+          <rect x="812" y="45" width="82" height="80" rx="8" fill="var(--surface-2)" stroke="currentColor"/>
+          <text x="853" y="80" text-anchor="middle" class="lbl">Browser</text>
+          <text x="853" y="95" text-anchor="middle" fill="var(--text-muted)" font-size="10">≤10 DAU</text>
+
+          <line x1="136" y1="85" x2="192" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="164" y="45" text-anchor="middle" fill="var(--text-muted)">cron / HTTP trigger</text>
+
+          <line x1="346" y1="85" x2="402" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="374" y="45" text-anchor="middle" fill="var(--text-muted)">export COG</text>
+          <text x="374" y="140" text-anchor="middle" fill="var(--text-muted)" font-size="10">~100–200MB · one-off</text>
+
+          <line x1="556" y1="85" x2="612" y2="85" stroke="currentColor" stroke-dasharray="5,4" marker-end="url(#arrR)"/>
+          <text x="584" y="45" text-anchor="middle" fill="var(--text-muted)">publish tiles</text>
+          <text x="584" y="140" text-anchor="middle" fill="var(--text-muted)" font-size="10">~50–150MB · one-off</text>
+
+          <line x1="766" y1="85" x2="808" y2="85" stroke="var(--gcp)" stroke-width="2" marker-end="url(#arrR)"/>
+          <text x="787" y="45" text-anchor="middle" fill="var(--gcp)" font-size="10">HTTPS</text>
+          <text x="787" y="140" text-anchor="middle" fill="var(--gcp)" font-size="10">~1–3MB/session</text>
+        </g>
+      </svg>
+    </figure>
+    <figcaption>Same shape again — this reading trades a little of the $0 bill for proper scheduling, secrets, and a managed CDN.</figcaption>
+  </div>
+  <p class="hint"><svg viewBox="0 0 20 20"><path d="M4 4l12 6-12 6 3-6z" fill="currentColor"/></svg>Expand each plane below for services, data movement, and protocols.</p>
+
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--gcp)">A</span>
+      <span class="summary-text"><span class="t">Classify — Earth Engine on a GCP project</span><span class="s"> · scheduled instead of run by hand</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 700 130" role="img" aria-label="Cloud Scheduler invokes a Cloud Function on a cron schedule; the function calls the Earth Engine Python API using credentials from Secret Manager and exports a classified raster to Cloud Storage." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="4" y="35" width="140" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="74" y="58" text-anchor="middle" class="lbl">Cloud Scheduler</text>
+            <text x="74" y="74" text-anchor="middle" fill="var(--text-muted)" font-size="10">cron, e.g. quarterly</text>
+
+            <rect x="222" y="20" width="180" height="90" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="312" y="42" text-anchor="middle" class="lbl">Cloud Function (2nd gen)</text>
+            <text x="312" y="58" text-anchor="middle" fill="var(--text-muted)" font-size="10">Earth Engine Python API</text>
+            <text x="312" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">reads key from Secret Manager</text>
+            <text x="312" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="10">role: earthengine.writer</text>
+            <text x="312" y="100" text-anchor="middle" fill="var(--text-muted)" font-size="10">custom, least-privilege</text>
+
+            <rect x="480" y="35" width="150" height="60" rx="8" fill="var(--gcp-soft)" stroke="var(--gcp)"/>
+            <text x="555" y="60" text-anchor="middle" class="lbl">Cloud Storage</text>
+            <text x="555" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">raw/lulc/{year}.tif</text>
+
+            <line x1="144" y1="65" x2="218" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="181" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">Pub/Sub trigger</text>
+            <line x1="402" y1="65" x2="476" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="439" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">export</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / format</th><th>Auth</th></tr>
+        <tr><td>1. Schedule</td><td>quarterly cron, e.g. new-imagery cadence</td><td class="mono">Cloud Scheduler → Pub/Sub → Cloud Function</td><td class="mono">HTTP trigger payload</td><td>service-account invoker role</td></tr>
+        <tr><td>2. Classify + export</td><td>same CART logic as reference</td><td class="mono">EE Python API, HTTPS</td><td class="mono">COG GeoTIFF, ~50–200MB</td><td>SA key held in Secret Manager, mounted at runtime</td></tr>
+      </table></div>
+    </div>
+  </details>
+
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--gcp)">B</span>
+      <span class="summary-text"><span class="t">Simulate + tile — Vertex AI Workbench + Cloud Build</span><span class="s"> · notebook for the science, a build pipeline for packaging</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 700 130" role="img" aria-label="Vertex AI Workbench runs CA-Markov simulation writing forecast rasters to Cloud Storage; a Cloud Build trigger runs a containerized tiling step from Artifact Registry and publishes a PMTiles archive back to Cloud Storage." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="4" y="35" width="150" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="79" y="58" text-anchor="middle" class="lbl">Vertex AI Workbench</text>
+            <text x="79" y="74" text-anchor="middle" fill="var(--text-muted)" font-size="10">managed notebook</text>
+
+            <rect x="232" y="20" width="180" height="90" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="322" y="42" text-anchor="middle" class="lbl">Cloud Build</text>
+            <text x="322" y="58" text-anchor="middle" fill="var(--text-muted)" font-size="10">tiling container run</text>
+            <text x="322" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">image from Artifact Registry</text>
+            <text x="322" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="10">gdal2tiles → PMTiles</text>
+
+            <rect x="500" y="35" width="150" height="60" rx="8" fill="var(--gcp-soft)" stroke="var(--gcp)"/>
+            <text x="575" y="56" text-anchor="middle" class="lbl">Cloud Storage</text>
+            <text x="575" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">tiles/, private + signed</text>
+
+            <line x1="154" y1="65" x2="228" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="191" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">writes forecast COG</text>
+            <line x1="412" y1="65" x2="496" y2="65" stroke="currentColor" marker-end="url(#arrR)"/>
+            <text x="454" y="55" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">publish</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / format</th><th>Auth</th></tr>
+        <tr><td>1. Simulate</td><td>same CA-Markov script as reference</td><td class="mono">Cloud Storage client library, HTTPS</td><td class="mono">COG GeoTIFF</td><td>Workbench's attached service account</td></tr>
+        <tr><td>2. Tile (CI)</td><td>triggered on push to a small repo</td><td class="mono">Cloud Build YAML, container from Artifact Registry</td><td class="mono">PMTiles, 20–150MB</td><td>Cloud Build default SA, scoped</td></tr>
+        <tr><td>3. Publish</td><td>bucket stays private</td><td class="mono">HTTPS PUT</td><td class="mono">object with uniform bucket-level access</td><td>signed URL / CDN origin only, not public ACL</td></tr>
+      </table></div>
+    </div>
+  </details>
+
+  <details class="plane">
+    <summary>
+      <span class="planetag" style="background:var(--gcp)">C</span>
+      <span class="summary-text"><span class="t">Serve — Cloud CDN + External HTTPS Load Balancer</span><span class="s"> · the "proper" GCP pattern; costs a small fixed fee</span></span>
+      <svg class="chevron" viewBox="0 0 20 20"><path d="M7 4l7 6-7 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+    </summary>
+    <div class="plane-body">
+      <div class="mini-diagram">
+        <svg viewBox="0 0 700 130" role="img" aria-label="A browser loads a static app through an External HTTPS Load Balancer with Cloud CDN, backed by a private Cloud Storage bucket, and issues range requests against the same path for the PMTiles archive." style="width:100%;height:auto;">
+          <g font-size="11">
+            <rect x="4" y="20" width="180" height="90" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="94" y="42" text-anchor="middle" class="lbl">External HTTPS LB</text>
+            <text x="94" y="58" text-anchor="middle" fill="var(--text-muted)" font-size="10">Google-managed SSL cert</text>
+            <text x="94" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">Cloud CDN enabled</text>
+            <text x="94" y="86" text-anchor="middle" fill="var(--text-muted)" font-size="10">backend bucket (private)</text>
+
+            <rect x="265" y="35" width="150" height="60" rx="8" fill="var(--surface)" stroke="currentColor"/>
+            <text x="340" y="60" text-anchor="middle" class="lbl">Browser</text>
+            <text x="340" y="76" text-anchor="middle" fill="var(--text-muted)" font-size="10">MapLibre GL + pmtiles.js</text>
+
+            <rect x="496" y="35" width="180" height="60" rx="8" fill="var(--gcp-soft)" stroke="var(--gcp)"/>
+            <text x="586" y="56" text-anchor="middle" class="lbl">Cloud Storage (private)</text>
+            <text x="586" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">app/ + tiles/*.pmtiles</text>
+
+            <line x1="184" y1="65" x2="261" y2="65" stroke="var(--gcp)" stroke-width="2" marker-end="url(#arrR)"/>
+            <text x="222" y="120" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">GET /</text>
+            <line x1="415" y1="65" x2="492" y2="65" stroke="currentColor" stroke-dasharray="4,3" marker-end="url(#arrR)"/>
+            <text x="453" y="120" text-anchor="middle" fill="var(--text-muted)" font-size="9.5">on cache miss</text>
+          </g>
+        </svg>
+      </div>
+      <div class="tblwrap"><table>
+        <tr><th>Step</th><th>Config</th><th class="mono">Protocol / API</th><th class="mono">Data / size</th><th>Auth</th></tr>
+        <tr><td>1. Deploy app</td><td>versioned object names, LB invalidation on deploy</td><td class="mono">HTTPS, Cloud Storage JSON API</td><td class="mono">~2–5MB bundle</td><td>service account, Storage Object Admin</td></tr>
+        <tr><td>2. CDN edge</td><td>backend bucket, not a public URL</td><td class="mono">HTTPS, TLS via Google-managed cert, HTTP/2</td><td class="mono">~150KB app shell, cached</td><td>public viewer</td></tr>
+        <tr><td>3. Tile fetch</td><td>Cloud CDN forwards Range headers</td><td class="mono"><code>Range: bytes=X-Y</code></td><td class="mono">5–30 reads/view</td><td>public viewer</td></tr>
+      </table></div>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-top:10px;">Honest trade-off: the forwarding rule behind this load balancer carries a small fixed hourly charge (~$18/month) regardless of traffic. For 10 DAU, Firebase Hosting or a Cloud Storage bucket behind Cloud CDN without the LB is cheaper — use this pattern only if the exercise specifically wants the enterprise-shaped GCP answer.</p>
+    </div>
+  </details>
+
+  <div class="costbox">
+    <h4>GCP stack — monthly cost at 10 DAU</h4>
+    <div class="tblwrap"><table>
+      <tr><th>Line item</th><th>Free allowance</th><th>Expected use</th><th>Cost</th></tr>
+      <tr><td>Earth Engine + Cloud Function</td><td>2M invocations/mo free</td><td>a few scheduled runs</td><td class="mono">$0</td></tr>
+      <tr><td>Vertex AI Workbench</td><td>none (pay-per-use compute)</td><td>e2-micro, a few hours</td><td class="mono">~$1–2</td></tr>
+      <tr><td>Cloud Storage + Cloud Build</td><td>5GB free; 120 build-min/day free</td><td>&lt;1GB, few builds</td><td class="mono">$0</td></tr>
+      <tr><td>External HTTPS LB + Cloud CDN</td><td>none — fixed forwarding-rule fee</td><td>always-on rule</td><td class="mono">~$18</td></tr>
+      <tr><td><b>Total</b></td><td></td><td></td><td class="mono"><b>~$19–20/mo</b> (or $0–2/mo if Firebase Hosting replaces the LB)</td></tr>
+    </table></div>
+  </div>
+</section>
+
+<!-- ============================================================ COMPARE ============================================================ -->
+<section class="tabpanel" id="panel-cmp" role="tabpanel" aria-labelledby="tab-cmp" hidden>
+  <h3>Same five capabilities, three providers</h3>
+  <p style="color:var(--text-muted); font-size:13.5px;"><span class="badge ref">ref</span> the free-tier build described above · <span class="badge aws">aws</span> AWS mapping · <span class="badge gcp">gcp</span> GCP mapping with proper IAM/CDN</p>
+  <div class="tblwrap"><table>
+    <tr><th>Capability</th><th><span class="badge ref">Reference</span></th><th><span class="badge aws">AWS</span></th><th><span class="badge gcp">GCP</span></th></tr>
+    <tr><td>Imagery + classification</td><td class="mono">Earth Engine (managed, free)</td><td class="mono">S3 Open Data + SageMaker Studio Lab / EC2 t4g.micro</td><td class="mono">Earth Engine + Cloud Function</td></tr>
+    <tr><td>Simulation compute</td><td class="mono">Colab (free T4/CPU)</td><td class="mono">SageMaker Studio Lab / EC2</td><td class="mono">Vertex AI Workbench</td></tr>
+    <tr><td>Object + tile storage</td><td class="mono">Cloud Storage</td><td class="mono">S3</td><td class="mono">Cloud Storage</td></tr>
+    <tr><td>CDN / edge</td><td class="mono">Firebase Hosting CDN</td><td class="mono">CloudFront</td><td class="mono">Cloud CDN (+ optional LB)</td></tr>
+    <tr><td>Static hosting</td><td class="mono">Firebase Hosting</td><td class="mono">S3 static site / Amplify</td><td class="mono">Cloud Storage backend bucket</td></tr>
+    <tr><td>Optional dynamic API (phase 1.5)</td><td class="mono">Cloud Run</td><td class="mono">Lambda + API Gateway (HTTP API)</td><td class="mono">Cloud Run</td></tr>
+    <tr><td>Optional metadata store</td><td class="mono">Firestore</td><td class="mono">DynamoDB</td><td class="mono">Firestore</td></tr>
+    <tr><td>Secrets</td><td class="mono">SA key file (local)</td><td class="mono">Secrets Manager / SSM Parameter Store</td><td class="mono">Secret Manager</td></tr>
+    <tr><td>Scheduling</td><td class="mono">manual trigger</td><td class="mono">EventBridge Scheduler</td><td class="mono">Cloud Scheduler</td></tr>
+    <tr><td>Est. monthly cost @ 10 DAU</td><td class="mono"><b>$0</b></td><td class="mono"><b>$0</b> (yr 1), &lt;$1 after</td><td class="mono"><b>$0–2</b> (Firebase-style) / ~$19 (LB-style)</td></tr>
+  </table></div>
+
+  <div class="callout" style="margin-top:22px;">
+    <h4>Recommendation for a solo POC</h4>
+    <p style="font-size:13.5px;">Build on the <b>reference stack</b>: Earth Engine's free CART classifier and managed catalog remove the heaviest lift (imagery ingestion + classification), and a static PMTiles-on-CDN serving layer means there is nothing running that can incur a surprise bill. Treat the AWS and GCP columns as the "how would this look as a resume-grade solution architecture" answer — worth having ready, not worth deploying twice for a phase-1 demo.</p>
+  </div>
+</section>
+
+<footer>Reference: Abdelsamie et al., "Current and Potential LULC Scenarios in Dry Lands Using a CA-Markov Simulation Model and CART Method: A Cloud-Based Google Earth Engine Approach," Sustainability 2024, 16, 11130 — the CART + CA-Markov methodology this pipeline mirrors, applied here to Guwahati instead of Qena.</footer>
+
+<script>
+(function(){
+  var tabs = [
+    {btn:'tab-ref', panel:'panel-ref'},
+    {btn:'tab-aws', panel:'panel-aws'},
+    {btn:'tab-gcp', panel:'panel-gcp'},
+    {btn:'tab-cmp', panel:'panel-cmp'}
+  ];
+  function select(id){
+    tabs.forEach(function(t){
+      var btn = document.getElementById(t.btn);
+      var panel = document.getElementById(t.panel);
+      var on = t.btn === id;
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      if(on){ panel.removeAttribute('hidden'); } else { panel.setAttribute('hidden',''); }
+    });
+  }
+  tabs.forEach(function(t){
+    var btn = document.getElementById(t.btn);
+    btn.addEventListener('click', function(){ select(t.btn); });
+  });
+})();
+</script>
+
+</body></html>
