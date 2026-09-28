@@ -15,7 +15,8 @@ app = Flask(__name__, static_folder="public", static_url_path="")
 BBOX = {"west": 91.55, "south": 26.10, "east": 91.88, "north": 26.25}
 SCALE = 30
 LULC_PALETTE = ["e41a1c", "4daf4a", "377eb8", "c2a06a"]
-CLASSIFY_BANDS = ["NDVI", "NDBI", "NDWI"]
+CLASSIFY_BANDS = ["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7",
+                  "NDVI", "NDBI", "NDWI"]
 
 EPOCHS_CFG = {
     "2000": ("2000-11-01", "2001-04-30", "L5"),
@@ -118,26 +119,26 @@ def run_pipeline():
     for lbl, (s, e, sen) in EPOCHS_CFG.items():
         composites[lbl] = build_composite(aoi, s, e, sen)
 
-    ref = composites["2021"]
-    ndvi, ndbi, ndwi = ref.select("NDVI"), ref.select("NDBI"), ref.select("NDWI")
-    labels = (ee.Image(0)
-              .where(ndbi.gt(0).And(ndvi.lt(0.25)), 0)
-              .where(ndvi.gt(0.35).And(ndbi.lt(0)), 1)
-              .where(ndwi.gt(0.1).And(ndvi.lt(0.15)), 2)
-              .where(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0)), 3)
-              .rename("label").toUint8())
-    mask = (ndbi.gt(0).And(ndvi.lt(0.25))
-            .Or(ndvi.gt(0.35).And(ndbi.lt(0)))
-            .Or(ndwi.gt(0.1).And(ndvi.lt(0.15)))
-            .Or(ndvi.lt(0.15).And(ndbi.lt(0.05)).And(ndwi.lt(0))))
-    samples = (ref.addBands(labels.updateMask(mask))
-               .stratifiedSample(500, "label", aoi, SCALE, seed=42, geometries=True))
-    cart = ee.Classifier.smileCart(maxNodes=50).train(samples, "label", CLASSIFY_BANDS)
+    def classify_epoch(comp):
+        ndvi, ndbi, ndwi = comp.select("NDVI"), comp.select("NDBI"), comp.select("NDWI")
+        is_water = ndwi.gt(0.1).And(ndvi.lt(0.15))
+        is_veg = ndvi.gt(0.3).And(ndbi.lt(0))
+        is_urban = ndbi.gt(0.05).And(ndvi.lt(0.2))
+        is_barren = ndvi.lt(0.3).And(ndbi.lte(0.05)).And(ndbi.gt(-0.15)).And(ndwi.lt(0))
 
-    lulc_maps = {
-        lbl: comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
-        for lbl, comp in composites.items()
-    }
+        labels = (ee.Image(0)
+                  .where(is_urban, 0)
+                  .where(is_veg, 1)
+                  .where(is_barren, 3)
+                  .where(is_water, 2)
+                  .rename("label").toUint8())
+        mask = is_urban.Or(is_veg).Or(is_water).Or(is_barren)
+        samples = (comp.addBands(labels.updateMask(mask))
+                   .stratifiedSample(500, "label", aoi, SCALE, seed=42, geometries=True))
+        cart = ee.Classifier.smileCart(maxNodes=50).train(samples, "label", CLASSIFY_BANDS)
+        return comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
+
+    lulc_maps = {lbl: classify_epoch(comp) for lbl, comp in composites.items()}
 
     # Markov + GBT forecasting
     def compute_tm(lf, lt):
