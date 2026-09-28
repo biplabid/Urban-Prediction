@@ -122,26 +122,30 @@ def run_pipeline():
     for lbl, (s, e, sen) in EPOCHS_CFG.items():
         composites[lbl] = build_composite(aoi, s, e, sen)
 
-    def classify_epoch(comp):
-        ndvi, ndbi, ndwi = comp.select("NDVI"), comp.select("NDBI"), comp.select("NDWI")
-        is_water = ndwi.gt(0.1).And(ndvi.lt(0.15))
-        is_veg = ndvi.gt(0.3).And(ndbi.lt(0))
-        is_urban = ndbi.gt(0.05).And(ndvi.lt(0.2))
-        is_barren = ndvi.lt(0.3).And(ndbi.lte(0.05)).And(ndbi.gt(-0.15)).And(ndwi.lt(0))
+    # Index thresholds cannot separate built-up from dry-season bare farmland:
+    # both read high-NDBI/low-NDVI. Train on ESA WorldCover's validated Built-up
+    # class instead, then apply that classifier to every harmonized epoch.
+    wc = ee.Image("ESA/WorldCover/v200/2021").select("Map").clip(aoi)
+    wc_label = (ee.Image(0)
+                .where(wc.eq(50), 0)                                   # built-up
+                .where(wc.eq(10).Or(wc.eq(20)).Or(wc.eq(30))
+                       .Or(wc.eq(40)).Or(wc.eq(95)), 1)                # vegetation
+                .where(wc.eq(80).Or(wc.eq(90)), 2)                     # water
+                .where(wc.eq(60), 3)                                   # bare / sparse
+                .rename("label").toUint8())
+    wc_mask = (wc.eq(50).Or(wc.eq(10)).Or(wc.eq(20)).Or(wc.eq(30))
+               .Or(wc.eq(40)).Or(wc.eq(95)).Or(wc.eq(80)).Or(wc.eq(90)).Or(wc.eq(60)))
 
-        labels = (ee.Image(0)
-                  .where(is_urban, 0)
-                  .where(is_veg, 1)
-                  .where(is_barren, 3)
-                  .where(is_water, 2)
-                  .rename("label").toUint8())
-        mask = is_urban.Or(is_veg).Or(is_water).Or(is_barren)
-        samples = (comp.addBands(labels.updateMask(mask))
-                   .stratifiedSample(500, "label", aoi, SCALE, seed=42, geometries=True))
-        cart = ee.Classifier.smileCart(maxNodes=50).train(samples, "label", CLASSIFY_BANDS)
-        return comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
+    train_samples = (composites["2021"].addBands(wc_label.updateMask(wc_mask))
+                     .stratifiedSample(1000, "label", aoi, SCALE, seed=42,
+                                       geometries=True, tileScale=4))
+    cart = ee.Classifier.smileRandomForest(60).train(
+        train_samples, "label", CLASSIFY_BANDS)
 
-    lulc_maps = {lbl: classify_epoch(comp) for lbl, comp in composites.items()}
+    lulc_maps = {
+        lbl: comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
+        for lbl, comp in composites.items()
+    }
 
     # Markov + GBT forecasting
     def compute_tm(lf, lt):
@@ -188,9 +192,14 @@ def run_pipeline():
                  .addBands(proximity_stack(aoi, lulc_maps["2021"]))
                  .classify(gbt_prob).rename("urban_prob").toFloat())
 
-    # One server-side reduction yields the whole percentile table, avoiding the
-    # 5000-element cap on pulling a sampled FeatureCollection client-side.
-    suit_pctiles = base_suit.reduceRegion(
+    # Cells eligible to urbanise: non-urban in 2021, with water protected.
+    base_2021 = lulc_maps["2021"]
+    candidates = base_2021.neq(0).And(base_2021.neq(2))
+
+    # Percentiles over the candidate cells only, so a percentile maps directly
+    # to "this share of convertible land". One server-side reduction avoids the
+    # 5000-element cap on pulling a sampled collection client-side.
+    suit_pctiles = base_suit.updateMask(candidates).reduceRegion(
         ee.Reducer.percentile(list(range(0, 100))), aoi, SCALE * 2,
         maxPixels=1e9, tileScale=4, bestEffort=True).getInfo() or {}
     if not any(k.endswith("_p50") for k in suit_pctiles):
@@ -202,24 +211,26 @@ def run_pipeline():
             ee.Reducer.frequencyHistogram(), aoi, SCALE * 2,
             maxPixels=1e9, tileScale=4).get("lulc").getInfo() or {}
         px_area = (SCALE * 2) ** 2
-        return {c: hist.get(str(c), 0) * px_area for c in range(4)}
+        return {c: float(hist.get(str(c), 0)) * px_area for c in range(4)}
 
-    def forecast_step(cur, tm):
+    # Suitability is static, so each step must claim a progressively larger
+    # share of the candidate pool. Thresholding on a per-step fraction would
+    # reselect the same cells every time and stall the forecast.
+    predicted = {}
+    cur = base_2021
+    areas_2021 = class_areas(base_2021)
+    convertible = areas_2021[1] + areas_2021[3]
+    cum_converted = 0.0
+
+    for yr in ["2026", "2031", "2036"]:
         ca = class_areas(cur)
-        nu = sum(ca[c] * tm[c][0] for c in range(1, 4))
-        nt = sum(ca[c] for c in range(1, 4))
-        frac = nu / nt if nt > 0 else 0
-        pctl = max(0, min(99, int(round((1 - frac) * 100))))
+        cum_converted += sum(ca[c] * avg_tm[c][0] for c in (1, 3))
+        share = cum_converted / convertible if convertible > 0 else 0.0
+        pctl = max(0, min(99, int(round((1 - share) * 100))))
         thr = next((v for k, v in suit_pctiles.items()
                     if k.endswith(f"_p{pctl}") and v is not None), None)
-        if thr is None:
-            return cur
-        return cur.where(cur.neq(0).And(cur.neq(2)).And(base_suit.gt(thr).unmask(0)), 0)
-
-    predicted = {}
-    cur = lulc_maps["2021"]
-    for yr in ["2026", "2031", "2036"]:
-        cur = forecast_step(cur, avg_tm)
+        if thr is not None:
+            cur = base_2021.where(candidates.And(base_suit.gte(thr)), 0)
         predicted[yr] = cur
 
     all_lulc = {**lulc_maps, **predicted}
