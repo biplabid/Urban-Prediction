@@ -191,7 +191,8 @@ def run_pipeline():
         frac = nu / nt if nt > 0 else 0
         pctl = max(0, min(99, (1 - frac) * 100))
         thr = ee.Number(suit.reduceRegion(
-            ee.Reducer.percentile([pctl]), aoi, SCALE, maxPixels=1e9).get("urban_prob")).getInfo()
+            ee.Reducer.percentile([pctl]), aoi, SCALE,
+            maxPixels=1e9, tileScale=4).get("urban_prob")).getInfo()
         return cur.where(cur.neq(0).And(suit.gt(thr).unmask(0).And(cur.neq(2))), 0)
 
     predicted = {}
