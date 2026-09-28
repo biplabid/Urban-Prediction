@@ -43,6 +43,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .spin{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 #ls{font-size:12px;color:var(--dim);max-width:80%;text-align:center}
+#pbar-wrap{width:280px;height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px}
+#pbar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--adim));border-radius:3px;transition:width .6s ease}
+#psteps{display:flex;flex-direction:column;gap:6px;margin-top:12px;font-size:11px;width:280px}
+.pstep{display:flex;align-items:center;gap:8px;color:var(--dim);transition:color .3s}
+.pstep.active{color:var(--accent)}
+.pstep.done{color:var(--veg)}
+.pstep .pi{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;transition:border-color .3s,background .3s}
+.pstep.active .pi{border-color:var(--accent);animation:pulse 1.2s infinite}
+.pstep.done .pi{border-color:var(--veg);background:var(--veg);color:var(--bg)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+#elapsed{font-size:10px;color:var(--dim);margin-top:8px}
 #banner{display:none;position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:200;background:#ff9800;color:#000;padding:8px 20px;border-radius:0 0 8px 8px;font-size:12px;text-align:center;max-width:90vw;font-weight:500}
 @media(max-width:768px){#sidebar{width:220px}#stats{width:200px}}
 @media(max-width:520px){#sidebar,#stats{display:none}}
@@ -50,7 +61,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </head>
 <body>
 <div id="banner"></div>
-<div id="loading"><div class="spin"></div><h2>Guwahati Urban Prediction</h2><div id="ls">Initializing...</div></div>
+<div id="loading">
+<div class="spin"></div>
+<h2>Guwahati Urban Prediction</h2>
+<div id="ls">Initializing...</div>
+<div id="pbar-wrap"><div id="pbar"></div></div>
+<div id="psteps">
+<div class="pstep" data-s="0"><div class="pi"></div>Connecting to Earth Engine</div>
+<div class="pstep" data-s="1"><div class="pi"></div>Building satellite composites (5 epochs)</div>
+<div class="pstep" data-s="2"><div class="pi"></div>Classifying land use / land cover</div>
+<div class="pstep" data-s="3"><div class="pi"></div>Training urban growth model (GBT)</div>
+<div class="pstep" data-s="4"><div class="pi"></div>Forecasting 2026, 2031, 2036</div>
+<div class="pstep" data-s="5"><div class="pi"></div>Generating map tile URLs</div>
+</div>
+<div id="elapsed"></div>
+</div>
 <div id="header"><div><h1>Guwahati Urban Development Prediction</h1><div class="sub">10-Year Growth Forecast (2026&ndash;2036) &middot; Landsat 30m</div></div><span class="badge">PoC v1.0</span></div>
 <div id="map"></div>
 <div id="sidebar">
@@ -92,6 +117,17 @@ var OL = [
   {id:'osm_water',l:'Water (OSM)',d:false}
 ];
 var M = null, map = null, ci = 4, hasLiveTiles = false;
+var _progTimer = null, _progStart = 0;
+
+var STAGES = [
+  {t: 0,   pct: 5,   msg: 'Connecting to Earth Engine...'},
+  {t: 8,   pct: 15,  msg: 'Building satellite composites (5 epochs)...'},
+  {t: 30,  pct: 35,  msg: 'Classifying land use / land cover...'},
+  {t: 60,  pct: 50,  msg: 'Training urban growth model (GBT)...'},
+  {t: 120, pct: 70,  msg: 'Forecasting 2026, 2031, 2036...'},
+  {t: 200, pct: 85,  msg: 'Generating map tile URLs...'},
+  {t: 280, pct: 95,  msg: 'Almost there...'}
+];
 
 function ss(m) {
   var e = document.getElementById('ls');
@@ -104,6 +140,64 @@ function showBanner(m) {
   e.style.display = 'block';
 }
 
+function startProgress() {
+  _progStart = Date.now();
+  var steps = document.querySelectorAll('.pstep');
+  steps.forEach(function(s){ s.className = 'pstep'; s.querySelector('.pi').textContent = ''; });
+  document.getElementById('pbar').style.width = '0%';
+  document.getElementById('pbar-wrap').style.display = '';
+  document.getElementById('psteps').style.display = '';
+  document.getElementById('elapsed').style.display = '';
+
+  _progTimer = setInterval(function() {
+    var elapsed = (Date.now() - _progStart) / 1000;
+    var mins = Math.floor(elapsed / 60);
+    var secs = Math.floor(elapsed % 60);
+    document.getElementById('elapsed').textContent =
+      (mins > 0 ? mins + 'm ' : '') + secs + 's elapsed';
+
+    var activeIdx = 0;
+    for (var i = STAGES.length - 1; i >= 0; i--) {
+      if (elapsed >= STAGES[i].t) { activeIdx = i; break; }
+    }
+
+    ss(STAGES[activeIdx].msg);
+    document.getElementById('pbar').style.width = STAGES[activeIdx].pct + '%';
+
+    steps.forEach(function(s, j) {
+      var pi = s.querySelector('.pi');
+      if (j < activeIdx) {
+        s.className = 'pstep done';
+        pi.textContent = '✓';
+      } else if (j === activeIdx) {
+        s.className = 'pstep active';
+        pi.textContent = '';
+      } else {
+        s.className = 'pstep';
+        pi.textContent = '';
+      }
+    });
+  }, 500);
+}
+
+function stopProgress(success) {
+  if (_progTimer) { clearInterval(_progTimer); _progTimer = null; }
+  document.getElementById('pbar').style.width = '100%';
+  var steps = document.querySelectorAll('.pstep');
+  if (success) {
+    steps.forEach(function(s) {
+      s.className = 'pstep done';
+      s.querySelector('.pi').textContent = '✓';
+    });
+  }
+}
+
+function hideProgress() {
+  document.getElementById('pbar-wrap').style.display = 'none';
+  document.getElementById('psteps').style.display = 'none';
+  document.getElementById('elapsed').style.display = 'none';
+}
+
 // ── Load manifest: inline > fetch > demo fallback ──
 function loadM() {
   ss('Loading tile data...');
@@ -113,11 +207,14 @@ function loadM() {
       Object.keys(INLINE_MANIFEST.tile_layers).length > 0) {
     M = INLINE_MANIFEST;
     hasLiveTiles = true;
+    hideProgress();
     console.log('Loaded inline manifest:', Object.keys(M.tile_layers).length, 'layers');
     return Promise.resolve();
   }
 
-  // 2. Try backend API (Cloud Run), then static manifest, then demo fallback
+  // 2. Try backend API (Cloud Run) with progress, then static file, then demo
+  startProgress();
+
   function tryLoad(url) {
     return fetch(url).then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -128,6 +225,7 @@ function loadM() {
   return tryLoad('/api/manifest').catch(function() {
     return tryLoad('tile_manifest.json');
   }).then(function(data) {
+    stopProgress(true);
     if (data.tile_layers && Object.keys(data.tile_layers).length > 0) {
       M = data;
       hasLiveTiles = true;
@@ -136,8 +234,8 @@ function loadM() {
       throw new Error('Manifest has no tile layers');
     }
   }).catch(function(e) {
+    stopProgress(false);
     console.warn('No live tile data available:', e.message);
-    // 3. Demo mode with real urban stats from the pipeline
     M = {
       tile_layers: {},
       urban_area_km2: {
