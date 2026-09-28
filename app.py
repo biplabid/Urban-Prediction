@@ -95,14 +95,17 @@ def build_composite(aoi, start, end, sensor):
     return col.select(L8_BANDS + ["NDVI", "NDBI", "NDWI"]).median().clip(aoi).toFloat()
 
 
+DT_NEIGHBORHOOD = 128
+
+
 def proximity_stack(aoi, lulc_img):
-    dw = lulc_img.eq(2).fastDistanceTransform(256).sqrt().multiply(SCALE).rename("dist_water")
+    dw = lulc_img.eq(2).fastDistanceTransform(DT_NEIGHBORHOOD).sqrt().multiply(SCALE).rename("dist_water")
     edge = lulc_img.eq(0).And(lulc_img.eq(0).focal_min(1).Not())
-    de = edge.fastDistanceTransform(256).sqrt().multiply(SCALE).rename("dist_urban_edge")
+    de = edge.fastDistanceTransform(DT_NEIGHBORHOOD).sqrt().multiply(SCALE).rename("dist_urban_edge")
     viirs = (ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG")
              .filterBounds(aoi).filterDate("2021-01-01", "2021-12-31")
              .select("avg_rad").median().clip(aoi))
-    dr = viirs.gt(5).unmask(0).fastDistanceTransform(256).sqrt().multiply(SCALE).rename("dist_road")
+    dr = viirs.gt(5).unmask(0).fastDistanceTransform(DT_NEIGHBORHOOD).sqrt().multiply(SCALE).rename("dist_road")
     srtm = ee.Image("USGS/SRTMGL1_003").clip(aoi)
     return (dw.addBands(de).addBands(dr)
             .addBands(ee.Terrain.slope(srtm).rename("slope"))
@@ -190,9 +193,13 @@ def run_pipeline():
         nt = sum(ca[c] for c in range(1, 4))
         frac = nu / nt if nt > 0 else 0
         pctl = max(0, min(99, (1 - frac) * 100))
-        thr = ee.Number(suit.reduceRegion(
-            ee.Reducer.percentile([pctl]), aoi, SCALE * 4,
-            maxPixels=1e9, tileScale=4, bestEffort=True).get("urban_prob")).getInfo()
+        p = int(round(pctl))
+        sampled = suit.sample(region=aoi, scale=SCALE * 2, numPixels=8000,
+                              seed=1, dropNulls=True, tileScale=4)
+        thr = sampled.reduceColumns(
+            ee.Reducer.percentile([p]), ["urban_prob"]).get(f"p{p}").getInfo()
+        if thr is None:
+            return cur
         return cur.where(cur.neq(0).And(suit.gt(thr).unmask(0).And(cur.neq(2))), 0)
 
     predicted = {}
