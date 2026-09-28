@@ -116,7 +116,7 @@ var OL = [
   {id:'osm_roads',l:'Roads (OSM)',d:false},
   {id:'osm_water',l:'Water (OSM)',d:false}
 ];
-var M = null, map = null, ci = 4, hasLiveTiles = false;
+var M = null, map = null, ci = 4, hasLiveTiles = false, loadError = null;
 var _progTimer = null, _progStart = 0;
 
 var STAGES = [
@@ -236,16 +236,9 @@ function loadM() {
   }).catch(function(e) {
     stopProgress(false);
     console.warn('No live tile data available:', e.message);
-    M = {
-      tile_layers: {},
-      urban_area_km2: {
-        '2000': 42.8, '2005': 52.1, '2010': 63.5,
-        '2016': 78.3, '2021': 91.7,
-        '2026': 108.4, '2031': 124.6, '2036': 139.2
-      },
-      vector_layers: {}
-    };
+    M = { tile_layers: {}, urban_area_km2: {}, vector_layers: {} };
     hasLiveTiles = false;
+    loadError = e.message;
   });
 }
 
@@ -338,8 +331,10 @@ function onLoad() {
   drawChart();
 
   if (!hasLiveTiles) {
-    showBanner('Demo mode — showing stats &amp; chart with sample data. ' +
-      'For live LULC map tiles, run the Layer 5 Colab notebook and open the Colab preview URL.');
+    showBanner('Could not load analysis results' +
+      (loadError ? ' (' + loadError + ')' : '') +
+      '. No map tiles, statistics or forecasts are shown &mdash; ' +
+      'the figures below are not available rather than zero.');
   }
   setTimeout(function(){ document.getElementById('loading').classList.add('h'); }, 600);
 }
