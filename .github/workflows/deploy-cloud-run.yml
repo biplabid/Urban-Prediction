@@ -61,6 +61,7 @@ jobs:
             --min-instances=0
             --max-instances=2
             --allow-unauthenticated
+            --service-account=github-deploy@vivid-brand-182819.iam.gserviceaccount.com
           env_vars: |
             GEE_PROJECT=vivid-brand-182819
 

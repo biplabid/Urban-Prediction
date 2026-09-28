@@ -33,20 +33,11 @@ def init_ee():
     if _initialized:
         return
     project = os.environ.get("GEE_PROJECT", "vivid-brand-182819")
-    try:
-        credentials, _ = ee.data.get_credentials()
-        if credentials is None:
-            raise RuntimeError
-        ee.Initialize(project=project)
-    except Exception:
-        ee.Initialize(
-            credentials=ee.ServiceAccountCredentials(
-                os.environ.get("GEE_SERVICE_ACCOUNT", ""),
-                key_data=os.environ.get("GEE_KEY_JSON", None),
-                key_file=os.environ.get("GEE_KEY_FILE", "service-account-key.json"),
-            ),
-            project=project,
-        )
+    import google.auth
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/earthengine"]
+    )
+    ee.Initialize(credentials=credentials, project=project)
     _initialized = True
 
 
@@ -306,7 +297,11 @@ def api_manifest():
             _cached_manifest = run_pipeline()
         return jsonify(_cached_manifest)
     except Exception as exc:
-        return jsonify({"error": str(exc), "tile_layers": {},
+        import traceback
+        tb = traceback.format_exc()
+        app.logger.error(f"Pipeline error: {tb}")
+        return jsonify({"error": str(exc), "traceback": tb,
+                        "tile_layers": {},
                         "urban_area_km2": {
                             "2000": 42.8, "2005": 52.1, "2010": 63.5,
                             "2016": 78.3, "2021": 91.7,
@@ -317,6 +312,19 @@ def api_manifest():
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/ee-test")
+def ee_test():
+    """Quick test of EE authentication — no heavy pipeline."""
+    try:
+        init_ee()
+        dem = ee.Image("USGS/SRTMGL1_003")
+        val = dem.sample(ee.Geometry.Point(91.7362, 26.1445), 30).first().get("elevation").getInfo()
+        return jsonify({"status": "ok", "elevation_at_guwahati": val})
+    except Exception as exc:
+        import traceback
+        return jsonify({"status": "error", "error": str(exc), "traceback": traceback.format_exc()}), 500
 
 
 if __name__ == "__main__":
