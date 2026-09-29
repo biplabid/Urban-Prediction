@@ -246,10 +246,14 @@ def run_pipeline():
     # percentiles were too coarse here: one percentile of the candidate pool is
     # several km2 while a 5-year step converts ~3, so consecutive steps rounded
     # to the same threshold and the forecast stalled.
-    PX_AREA = (SCALE * 2) ** 2
+    # Areas must be measured at the same scale the forecast is realised and
+    # reported at. Deriving the threshold from a 60m histogram while the final
+    # urban area is summed at 30m made each step convert about a quarter of its
+    # target, and put 2021 urban at 132.6 km2 here against 118.21 in the stats.
+    PX_AREA = SCALE ** 2
     hist_raw = base_suit.updateMask(candidates).reduceRegion(
-        ee.Reducer.fixedHistogram(0, 1, 500), aoi, SCALE * 2,
-        maxPixels=1e9, tileScale=4).get("urban_prob").getInfo()
+        ee.Reducer.fixedHistogram(0, 1, 500), aoi, SCALE,
+        maxPixels=1e9, tileScale=8).get("urban_prob").getInfo()
     if not hist_raw:
         raise RuntimeError("Empty suitability histogram over candidate cells")
     # [[binLeft, count], ...] ascending; walk from the top to convert the most
@@ -266,8 +270,8 @@ def run_pipeline():
 
     def class_areas(img):
         hist = img.rename("lulc").reduceRegion(
-            ee.Reducer.frequencyHistogram(), aoi, SCALE * 2,
-            maxPixels=1e9, tileScale=4).get("lulc").getInfo() or {}
+            ee.Reducer.frequencyHistogram(), aoi, SCALE,
+            maxPixels=1e9, tileScale=8).get("lulc").getInfo() or {}
         return {c: float(hist.get(str(c), 0)) * PX_AREA for c in range(4)}
 
     # Suitability is static, so each step must claim a progressively larger
