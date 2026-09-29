@@ -18,6 +18,13 @@ LULC_PALETTE = ["e41a1c", "4daf4a", "377eb8", "c2a06a"]
 INDEX_BANDS = ["NDVI", "NDBI", "NDWI", "MNDWI", "UI", "BSI", "SAVI"]
 CLASSIFY_BANDS = INDEX_BANDS
 
+# GHSL runs on a 5-year grid, so the 2016 and 2021 epochs map to its nearest
+# steps. built_surface is m2 of built cover within each 100m cell.
+GHSL_EPOCHS = {"2000": "2000", "2005": "2005", "2010": "2010",
+               "2016": "2015", "2021": "2020"}
+GHSL_CELL_AREA = 100 * 100
+GHSL_BUILT_THRESHOLD = 0.2
+
 EPOCHS_CFG = {
     "2000": ("2000-11-01", "2001-04-30", "L5"),
     "2005": ("2005-11-01", "2006-04-30", "L5"),
@@ -155,10 +162,34 @@ def run_pipeline():
     cart = ee.Classifier.smileRandomForest(30, seed=42).train(
         train_samples, "label", CLASSIFY_BANDS)
 
-    lulc_maps = {
-        lbl: comp.select(CLASSIFY_BANDS).classify(cart).toUint8().rename("lulc")
-        for lbl, comp in composites.items()
-    }
+    # The Landsat classifier supplies vegetation/water/barren context, but its
+    # urban class was not comparable across epochs: self-classified built-up
+    # broke at the L5/L8 boundary and drifted even within one sensor. Take the
+    # urban class from GHSL instead, a multi-temporal built-up surface product
+    # built for consistent change detection, and overlay it on the Landsat
+    # classes. Non-urban labels are kept from Landsat at its finer 30m detail.
+    ghsl_col = ee.ImageCollection("JRC/GHSL/P2023A/GHS_BUILT_S")
+    available = set(ghsl_col.aggregate_array("system:index").getInfo() or [])
+    missing = {v for v in GHSL_EPOCHS.values() if v not in available}
+    if missing:
+        raise RuntimeError(
+            f"GHSL epochs {sorted(missing)} not in collection; available: {sorted(available)}")
+
+    def built_fraction(epoch_year):
+        img = ghsl_col.filter(
+            ee.Filter.eq("system:index", GHSL_EPOCHS[epoch_year])).first()
+        return (ee.Image(img).select("built_surface").clip(aoi)
+                .divide(GHSL_CELL_AREA).clamp(0, 1).rename("built_frac"))
+
+    lulc_maps = {}
+    for lbl, comp in composites.items():
+        landsat_cls = comp.select(CLASSIFY_BANDS).classify(cart).toUint8()
+        is_built = built_fraction(lbl).gte(GHSL_BUILT_THRESHOLD)
+        # Demote Landsat's own urban guess to barren, then apply GHSL built-up.
+        base = landsat_cls.where(landsat_cls.eq(0), 3)
+        lulc_maps[lbl] = (base.where(is_built, 0)
+                          .where(landsat_cls.eq(2).And(is_built.Not()), 2)
+                          .toUint8().rename("lulc"))
 
     # Markov + GBT forecasting. One frequencyHistogram per transition rather
     # than a reduceRegion per matrix cell: 16 round trips collapse to 1.
