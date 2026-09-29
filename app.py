@@ -242,22 +242,33 @@ def run_pipeline():
     base_2021 = lulc_maps["2021"]
     candidates = base_2021.neq(0).And(base_2021.neq(2))
 
-    # Percentiles over the candidate cells only, so a percentile maps directly
-    # to "this share of convertible land". One server-side reduction avoids the
-    # 5000-element cap on pulling a sampled collection client-side.
-    suit_pctiles = base_suit.updateMask(candidates).reduceRegion(
-        ee.Reducer.percentile(list(range(0, 100))), aoi, SCALE * 2,
-        maxPixels=1e9, tileScale=4, bestEffort=True).getInfo() or {}
-    if not any(k.endswith("_p50") for k in suit_pctiles):
-        raise RuntimeError(
-            f"Unexpected percentile keys from Earth Engine: {sorted(suit_pctiles)[:8]}")
+    # A fine histogram of suitability over the candidate cells. Integer
+    # percentiles were too coarse here: one percentile of the candidate pool is
+    # several km2 while a 5-year step converts ~3, so consecutive steps rounded
+    # to the same threshold and the forecast stalled.
+    PX_AREA = (SCALE * 2) ** 2
+    hist_raw = base_suit.updateMask(candidates).reduceRegion(
+        ee.Reducer.fixedHistogram(0, 1, 500), aoi, SCALE * 2,
+        maxPixels=1e9, tileScale=4).get("urban_prob").getInfo()
+    if not hist_raw:
+        raise RuntimeError("Empty suitability histogram over candidate cells")
+    # [[binLeft, count], ...] ascending; walk from the top to convert the most
+    # suitable land first.
+    suit_bins = [(float(b), float(c)) for b, c in hist_raw]
+
+    def threshold_for_area(target_area):
+        acc = 0.0
+        for left, count in reversed(suit_bins):
+            acc += count * PX_AREA
+            if acc >= target_area:
+                return left
+        return suit_bins[0][0]
 
     def class_areas(img):
         hist = img.rename("lulc").reduceRegion(
             ee.Reducer.frequencyHistogram(), aoi, SCALE * 2,
             maxPixels=1e9, tileScale=4).get("lulc").getInfo() or {}
-        px_area = (SCALE * 2) ** 2
-        return {c: float(hist.get(str(c), 0)) * px_area for c in range(4)}
+        return {c: float(hist.get(str(c), 0)) * PX_AREA for c in range(4)}
 
     # Suitability is static, so each step must claim a progressively larger
     # share of the candidate pool. Thresholding on a per-step fraction would
@@ -271,12 +282,8 @@ def run_pipeline():
     for yr in ["2026", "2031", "2036"]:
         ca = class_areas(cur)
         cum_converted += sum(ca[c] * avg_tm[c][0] for c in (1, 3))
-        share = cum_converted / convertible if convertible > 0 else 0.0
-        pctl = max(0, min(99, int(round((1 - share) * 100))))
-        thr = next((v for k, v in suit_pctiles.items()
-                    if k.endswith(f"_p{pctl}") and v is not None), None)
-        if thr is not None:
-            cur = base_2021.where(candidates.And(base_suit.gte(thr)), 0)
+        thr = threshold_for_area(min(cum_converted, convertible))
+        cur = base_2021.where(candidates.And(base_suit.gte(thr)), 0)
         predicted[yr] = cur
 
     all_lulc = {**lulc_maps, **predicted}
