@@ -242,30 +242,42 @@ def run_pipeline():
     base_2021 = lulc_maps["2021"]
     candidates = base_2021.neq(0).And(base_2021.neq(2))
 
-    # A fine histogram of suitability over the candidate cells. Integer
-    # percentiles were too coarse here: one percentile of the candidate pool is
-    # several km2 while a 5-year step converts ~3, so consecutive steps rounded
-    # to the same threshold and the forecast stalled.
-    # Areas must be measured at the same scale the forecast is realised and
-    # reported at. Deriving the threshold from a 60m histogram while the final
-    # urban area is summed at 30m made each step convert about a quarter of its
-    # target, and put 2021 urban at 132.6 km2 here against 118.21 in the stats.
-    PX_AREA = SCALE ** 2
+    # Histogram counts are pixels; the reported stats sum pixelArea(), which is
+    # true ground area and runs ~12% under the nominal SCALE^2 at this latitude.
+    # Calibrate one effective pixel area from the AOI so counts and reported
+    # areas agree, instead of assuming 900 m2 per pixel.
+    aoi_area = ee.Image.pixelArea().reduceRegion(
+        ee.Reducer.sum(), aoi, SCALE, maxPixels=1e9, tileScale=8).get("area").getInfo()
+    aoi_px = ee.Image(1).rename("n").reduceRegion(
+        ee.Reducer.count(), aoi, SCALE, maxPixels=1e9, tileScale=8).get("n").getInfo()
+    if not aoi_area or not aoi_px:
+        raise RuntimeError("Could not calibrate pixel area over the AOI")
+    PX_AREA = float(aoi_area) / float(aoi_px)
+
     hist_raw = base_suit.updateMask(candidates).reduceRegion(
-        ee.Reducer.fixedHistogram(0, 1, 500), aoi, SCALE,
+        ee.Reducer.fixedHistogram(0, 1, 2000), aoi, SCALE,
         maxPixels=1e9, tileScale=8).get("urban_prob").getInfo()
     if not hist_raw:
         raise RuntimeError("Empty suitability histogram over candidate cells")
     # [[binLeft, count], ...] ascending; walk from the top to convert the most
     # suitable land first.
     suit_bins = [(float(b), float(c)) for b, c in hist_raw]
+    BIN_W = 1.0 / len(suit_bins)
 
     def threshold_for_area(target_area):
+        """Suitability cutoff enclosing target_area of candidate land.
+
+        Interpolates inside the bin that straddles the target: returning the
+        bin's left edge would admit every pixel in it, and near the peak of the
+        distribution a single bin holds hundreds of km2.
+        """
         acc = 0.0
         for left, count in reversed(suit_bins):
-            acc += count * PX_AREA
-            if acc >= target_area:
-                return left
+            area = count * PX_AREA
+            if acc + area >= target_area and area > 0:
+                take = (target_area - acc) / area
+                return left + BIN_W * (1.0 - take)
+            acc += area
         return suit_bins[0][0]
 
     def class_areas(img):
