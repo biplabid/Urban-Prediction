@@ -279,9 +279,11 @@ def run_pipeline():
     convertible = areas_2021[1] + areas_2021[3]
     cum_converted = 0.0
 
+    step_targets = []
     for yr in ["2026", "2031", "2036"]:
         ca = class_areas(cur)
         cum_converted += sum(ca[c] * avg_tm[c][0] for c in (1, 3))
+        step_targets.append(cum_converted)
         thr = threshold_for_area(min(cum_converted, convertible))
         cur = base_2021.where(candidates.And(base_suit.gte(thr)), 0)
         predicted[yr] = cur
@@ -366,6 +368,17 @@ def run_pipeline():
                  "palette": [f"#{c}" for c in LULC_PALETTE]},
         "tile_layers": tile_layers,
         "vector_layers": {},
+        "diagnostics": {
+            "urban_source": "JRC/GHSL/P2023A/GHS_BUILT_S",
+            "ghsl_epoch_map": GHSL_EPOCHS,
+            "ghsl_built_threshold": GHSL_BUILT_THRESHOLD,
+            "transition_matrix_avg": [[round(v, 6) for v in row] for row in avg_tm.tolist()],
+            "p_to_urban": {"vegetation": round(float(avg_tm[1][0]), 6),
+                           "barren": round(float(avg_tm[3][0]), 6)},
+            "areas_2021_km2": {c: round(areas_2021[c] / 1e6, 2) for c in areas_2021},
+            "convertible_km2": round(convertible / 1e6, 2),
+            "forecast_step_targets_km2": [round(t / 1e6, 2) for t in step_targets],
+        },
     }
 
 
